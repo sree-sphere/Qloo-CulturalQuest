@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Trophy, MapPin, Zap, Star, Gift, Compass, Calendar, Heart } from 'lucide-react';
+import { Trophy, MapPin, Zap, Gift, Compass, Heart } from 'lucide-react';
 import Image from 'next/image';
 
 // Qloo & SDK imports
@@ -7,12 +7,10 @@ import { Qloo } from '@devma/qloo';
 import { QlooCulturalGamification } from '../lib/qloo_gamification_sdk';
 
 // Initialize Qloo and gamification SDK
-const qloo = new Qloo({
-  apiKey: process.env.NEXT_PUBLIC_QLOO_API_KEY || ''  // 👈 must be accessible client-side
-});
+const qloo = new Qloo({apiKey: process.env.NEXT_PUBLIC_QLOO_API_KEY || ''});
 const gamification = new QlooCulturalGamification(qloo);
 
-// Mock user data with corrected location format
+// Mock user data
 const mockUser = {
   userId: 'user123',
   name: 'Priya Sharma',
@@ -23,13 +21,12 @@ const mockUser = {
   demographics: {
     age: '35_and_younger', // Changed from 29
     gender: 'female',
-    // Removed ethnicity: 'south_asian' (optional, not in UserProfile)
   },
   preferences: {
-    cuisines: ['Indian', 'Thai', 'Italian'], // Example based on achievements
-    culturalInterests: ['heritage', 'festivals', 'cuisine'], // Example interests
-    travelStyle: 'authentic', // Example travel style
-    nostalgicPeriods: ['traditional'], // Example nostalgic period
+    cuisines: ['Indian', 'Thai', 'Italian'],
+    culturalInterests: ['heritage', 'festivals', 'cuisine'],
+    travelStyle: 'authentic',
+    nostalgicPeriods: ['traditional'],
     isVegetarian: true
   },
   level: 7,
@@ -246,11 +243,8 @@ const CulturalGamificationApp = () => {
 
   const handleLearnMore = async (entityId: string) => {
   try {
-    // Find the full entity data from the original API response
-    // You'll need to store the full API response in state
     const entity = formattedRecommendations.find(r => r.entityId === entityId);
     if (entity) {
-      // For now, we'll use the formatted data, but ideally you'd store the full API response
       setEntityDetails(entity);
       setShowEntityModal(true);
     }
@@ -346,7 +340,7 @@ const CulturalGamificationApp = () => {
       if (mood === 'nostalgic') {
   const likedIds = new Set(JSON.parse(localStorage.getItem('liked-entities') || '[]'));
 
-  // 1. Format all entities first
+  // 1. Format all entities
   const formatted = uniqueEntities.map(entity => {
     const city = entity.properties?.geocode?.city;
     const categoryTag = entity.tags?.find(t => t.type.includes('category'))?.name;
@@ -379,7 +373,7 @@ const CulturalGamificationApp = () => {
     };
   });
 
-  // 2. Use the helper function to reorder
+  // 2. helper function to reorder
   const reordered = reorderNostalgicRecommendations(formatted, likedIds);
   
   localStorage.setItem(CACHE_KEY, JSON.stringify(reordered));
