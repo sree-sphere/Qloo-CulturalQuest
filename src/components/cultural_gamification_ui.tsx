@@ -120,16 +120,72 @@ const calculateSimilarityScore = (entity1: any, entity2: any): number => {
   return score;
 };
 
+const diversifyRecommendations = (recommendations, userAffinityVector, lambda = 0.7) => {
+  if (recommendations.length <= 3) return recommendations;
+  
+  const selected = [];
+  const remaining = [...recommendations];
+  
+  // Always include top recommendation
+  selected.push(remaining.shift());
+  
+  while (selected.length < Math.min(8, recommendations.length) && remaining.length > 0) {
+    let bestScore = -1;
+    let bestIndex = 0;
+    
+    remaining.forEach((candidate, index) => {
+      // Relevance score based on user affinity
+      const relevanceScore = calculateAffinityScore(candidate, userAffinityVector);
+      
+      // Diversity score (minimum similarity to already selected)
+      const diversityScore = selected.length > 0 
+        ? Math.min(...selected.map(sel => calculateSimilarityScore(candidate, sel)))
+        : 100;
+      
+      // MMR formula: λ * relevance - (1-λ) * max_similarity
+      const mmrScore = lambda * relevanceScore - (1 - lambda) * (100 - diversityScore);
+      
+      if (mmrScore > bestScore) {
+        bestScore = mmrScore;
+        bestIndex = index;
+      }
+    });
+    
+    selected.push(remaining.splice(bestIndex, 1)[0]);
+  }
+  
+  return selected;
+};
+
+const calculateAffinityScore = (entity, affinityVector) => {
+  let score = 50; // base score
+  
+  // Check affinity for entity features
+  const cuisine = entity.type.toLowerCase();
+  score += (affinityVector[`cuisine_${cuisine}`] || 0) * 20;
+  
+  const rating = parseFloat(entity.ratingStars.length);
+  score += (affinityVector.rating || 0) * rating * 5;
+  
+  const distance = parseFloat(entity.distance) || 5;
+  score -= (affinityVector.distance || 0) * distance * 2;
+  
+  return Math.max(0, Math.min(100, score));
+};
+
 const reorderNostalgicRecommendations = (recommendations: any[], likedIds: Set<string>) => {
   const likedEntities = recommendations.filter(r => likedIds.has(r.entityId));
   
   if (likedEntities.length === 0) {
-    // No likes, return shuffled
-    return recommendations.sort(() => Math.random() - 0.5);
+    // // No likes, return shuffled
+    // return recommendations.sort(() => Math.random() - 0.5);
+    // Use diversification for cold start
+    return diversifyRecommendations(recommendations, userAffinityVector);
   }
   
   // Calculate similarity scores for all entities
-  const scored = recommendations.map(entity => {
+  const scored = 
+  recommendations.map(entity => {
     let score = 0;
     
     if (likedIds.has(entity.entityId)) {
@@ -146,7 +202,8 @@ const reorderNostalgicRecommendations = (recommendations: any[], likedIds: Set<s
     score += Math.random() * 5;
     
     return { ...entity, _score: score };
-  });
+  }
+);
 
   // Sort by score descending
   return scored
@@ -239,7 +296,9 @@ const CulturalGamificationApp = () => {
 
   const [redeemAnimations, setRedeemAnimations] = useState<{[key: string]: boolean}>({});
   const [quickPromptLoading, setQuickPromptLoading] = useState<string | null>(null);
-
+  const [userAffinityVector, setUserAffinityVector] = useState(() => {
+  return JSON.parse(localStorage.getItem('user-affinity') || '{}');
+});
 
   const [userPoints, setUserPoints] = useState(mockUser.points);
   const [userLevel, setUserLevel] = useState(mockUser.level);
@@ -260,10 +319,46 @@ const CulturalGamificationApp = () => {
     setImageErrors(prev => new Set([...prev, entityId]));
   };
 
+  // Update affinity when user interacts
+const updateUserAffinity = (entityId, interaction) => {
+  const entity = formattedRecommendations.find(r => r.entityId === entityId);
+  if (!entity) return;
+  
+  // Extract features from entity
+  const features = {
+    cuisine: entity.type.toLowerCase(),
+    priceRange: entity.priceRange || 'medium',
+    rating: parseFloat(entity.ratingStars.length),
+    distance: parseFloat(entity.distance) || 5
+  };
+  
+  // Update affinity vector with learning rate
+  const learningRate = interaction === 'like' ? 0.1 : -0.05;
+  
+  setUserAffinityVector(prev => {
+    const updated = { ...prev };
+    Object.entries(features).forEach(([key, value]) => {
+      if (typeof value === 'string') {
+        updated[`${key}_${value}`] = (updated[`${key}_${value}`] || 0) + learningRate;
+      } else {
+        updated[key] = (updated[key] || 0) + learningRate * value;
+      }
+    });
+    
+    localStorage.setItem('user-affinity', JSON.stringify(updated));
+    return updated;
+  });
+};
+
   const handleHeartClick = async (entityId: string) => {
   // Trigger heart animation
   setHeartAnimation(entityId);
   setTimeout(() => setHeartAnimation(null), 600);
+
+  // Adaptive learning from User Feedback
+  const wasLiked = likedPlaces.has(entityId);
+  // Update affinity
+  updateUserAffinity(entityId, wasLiked ? 'unlike' : 'like');
   
   setLikedPlaces(prev => {
     const next = new Set(prev);
@@ -730,7 +825,7 @@ Instructions:
   return (currentLevelProgress / 1000) * 100;
   };
 
-  return (
+  return (    
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-indigo-900 to-pink-900">
       {/* Header */}
       <div className="bg-black/20 backdrop-blur-sm border-b border-white/10 sticky top-0 z-50">
