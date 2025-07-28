@@ -316,6 +316,8 @@ const CulturalGamificationApp = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formattedRecommendations, setRecommendations] = useState([]);
+  const [currentMode, setCurrentMode] = useState<'nostalgic' | 'adventurous' | 'social' | null>(null);
+
 
   const [likedPlaces, setLikedPlaces] = useState<Set<string>>(new Set());
   const [selectedEntity, setSelectedEntity] = useState<any>(null);
@@ -324,7 +326,7 @@ const CulturalGamificationApp = () => {
   const [heartAnimation, setHeartAnimation] = useState<string | null>(null);
   const [entityDetails, setEntityDetails] = useState<any>(null);
   const [showEntityModal, setShowEntityModal] = useState(false);
-  const CACHE_KEY = 'nostalgic-recs';
+  const CACHE_KEY = 'recs-nostalgic';
 
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -391,55 +393,6 @@ const updateUserAffinity = (entityId, interaction) => {
   });
 };
 
-  const handleHeartClick = async (entityId: string) => {
-  // Trigger heart animation
-  setHeartAnimation(entityId);
-  setTimeout(() => setHeartAnimation(null), 600);
-
-  // Adaptive learning from User Feedback
-  const wasLiked = likedPlaces.has(entityId);
-  // Update affinity
-  updateUserAffinity(entityId, wasLiked ? 'unlike' : 'like');
-  
-  setLikedPlaces(prev => {
-    const next = new Set(prev);
-    const wasLiked = next.has(entityId);
-    
-    if (wasLiked) {
-      next.delete(entityId);
-    } else {
-      next.add(entityId);
-    }
-    
-    localStorage.setItem('liked-entities', JSON.stringify(Array.from(next)));
-    
-    // Trigger reordering animation for nostalgic recommendations
-    const cachedNostalgic = localStorage.getItem(CACHE_KEY);
-    if (cachedNostalgic) {
-      try {
-        const cached = JSON.parse(cachedNostalgic);
-        if (cached.length && cached[0]?.entityId) {
-          setIsReordering(true);
-          
-          // Delay reordering for smooth animation
-          setTimeout(() => {
-            const reordered = reorderNostalgicRecommendations(cached, next, userAffinityVector);
-            setRecommendations(reordered);
-            localStorage.setItem(CACHE_KEY, JSON.stringify(reordered));
-            
-            setTimeout(() => setIsReordering(false), 300);
-          }, 200);
-        }
-      } catch (error) {
-        console.error('Error reordering after like/unlike:', error);
-        setIsReordering(false);
-      }
-    }
-    
-    return next;
-  });
-};
-
   const handleLearnMore = async (entityId: string) => {
   try {
     // Get full API data from localStorage
@@ -498,6 +451,50 @@ const updateUserAffinity = (entityId, interaction) => {
       }
     ];
 
+  const handleHeartClick = async (entityId: string) => {
+  setHeartAnimation(entityId);
+  setTimeout(() => setHeartAnimation(null), 600);
+
+  const wasLiked = likedPlaces.has(entityId);
+  updateUserAffinity(entityId, wasLiked ? 'unlike' : 'like');
+
+  setLikedPlaces(prev => {
+    const next = new Set(prev);
+    const wasLiked = next.has(entityId);
+
+    if (wasLiked) {
+      next.delete(entityId);
+    } else {
+      next.add(entityId);
+    }
+
+    localStorage.setItem('liked-entities', JSON.stringify(Array.from(next)));
+
+    // 🔄 Generic reordering logic for any mode (if cache exists)
+    const contextCacheKey = `recs-${currentMode}`;
+    const cachedContext = localStorage.getItem(contextCacheKey);
+    if (cachedContext) {
+      try {
+        const cached = JSON.parse(cachedContext);
+        if (cached.length && cached[0]?.entityId) {
+          setIsReordering(true);
+          setTimeout(() => {
+            const reordered = reorderNostalgicRecommendations(cached, next, userAffinityVector);
+            setRecommendations(reordered);
+            localStorage.setItem(contextCacheKey, JSON.stringify(reordered));
+            setTimeout(() => setIsReordering(false), 300);
+          }, 200);
+        }
+      } catch (error) {
+        console.error('Error reordering after like/unlike:', error);
+        setIsReordering(false);
+      }
+    }
+
+    return next;
+  });
+};
+  
   const handleQuery = async (
   query: string,
   forcedMood?: 'nostalgic' | 'adventurous' | 'relaxed',
@@ -517,6 +514,7 @@ const updateUserAffinity = (entityId, interaction) => {
     ? 'adventurous'
     : 'relaxed';
     const intent = forcedIntent || 'discover';
+    setCurrentMode(mood);
 
     const prompt = { mood, intent, context: query } as const;
     console.log('API prompt:', prompt);
@@ -534,7 +532,6 @@ const updateUserAffinity = (entityId, interaction) => {
         mockUser.location.current
       );
       console.log('API response:', recPayload);
-
       
       // Raw entity extraction
       // Dynamically extract entities based on response structure / forcedIntent
@@ -598,12 +595,11 @@ const updateUserAffinity = (entityId, interaction) => {
   // 2. Use the helper function to reorder
   const reordered = reorderNostalgicRecommendations(formatted, likedIds, userAffinityVector);
   
-  localStorage.setItem(CACHE_KEY, JSON.stringify(formatted));
+  const contextCacheKey = `recs-${mood}`;
+  localStorage.setItem(contextCacheKey, JSON.stringify(formatted));
   setRecommendations(reordered);
   return;
 }
-
-
       
       // “Plan my weekend in Austin” chat branch
       if (intent === 'discover' && mood === 'social') {
@@ -684,6 +680,8 @@ const updateUserAffinity = (entityId, interaction) => {
 
       console.log('Formatted recommendations:', formattedRecommendations);
       setRecommendations(formattedRecommendations);
+      const contextCacheKey = `recs-${mood}`;
+      localStorage.setItem(contextCacheKey, JSON.stringify(formattedRecommendations));
     } catch (error) {
       console.error('Error fetching recommendations:', error);
       setError('Failed to fetch recommendations. Please try again later.');
