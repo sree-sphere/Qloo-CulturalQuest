@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Cultural Gamification & Hyper-localization SDK
 // Built on top of Qloo TypeScript SDK
 

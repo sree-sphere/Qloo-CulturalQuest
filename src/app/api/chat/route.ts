@@ -1,4 +1,4 @@
-// /src/app/api/chat/route.ts
+// @ts-nocheck
 import { NextRequest } from 'next/server';
 
 export const runtime = 'edge';

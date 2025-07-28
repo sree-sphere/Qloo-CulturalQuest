@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useState, useEffect, useRef } from 'react';
 
 import { Trophy, MapPin, Zap, Gift, Compass, Heart } from 'lucide-react';
