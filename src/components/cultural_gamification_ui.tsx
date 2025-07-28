@@ -575,7 +575,7 @@ useEffect(() => {
 }
       
       // “Plan my weekend in ___ chat branch
-      if (intent === 'discover' || mood === 'social') {
+      if (intent === 'discover' && mood === 'social') {
   // 1) filter for weekend‑open & vegetarian
   const weekendOpen = uniqueEntities.filter(e => {
     const hrs = e.properties?.hours || {};
