@@ -235,12 +235,15 @@ useEffect(() => {
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [updatedRecommendations, setFormattedRecommendations] = useState<any[]>([]);
   const [formattedRecommendations, setRecommendations] = useState([]);
   const [currentMode, setCurrentMode] = useState<'nostalgic' | 'adventurous' | 'social' | null>(null);
 
-
   const [likedPlaces, setLikedPlaces] = useState<Set<string>>(new Set());
   const [isReordering, setIsReordering] = useState(false);
+  const [isDiversifying, setIsDiversifying] = useState(false);
+  const diversificationEnabled = true;
+  const [results, setResults] = useState<any[]>([]);
   const [heartAnimation, setHeartAnimation] = useState<string | null>(null);
   const [entityDetails, setEntityDetails] = useState<any>(null);
   const [showEntityModal, setShowEntityModal] = useState(false);
@@ -466,6 +469,87 @@ useEffect(() => {
     return next;
   });
 };
+
+  const diversifyRecommendations = async (entities: any[], userPrefs: string[]) => {
+  try {
+    setIsDiversifying(true);
+    console.log('Diversifying recommendations with Python engine...');
+    
+    const response = await fetch('/api/diversify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        entities: entities,
+        userPreferences: userPrefs,
+        options: {
+          nTotal: 8,
+          nHighAffinity: 3,
+          lambdaParam: 0.7
+        }
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Diversification failed: ${response.statusText}`);
+    }
+
+    const result = await response.json();
+    console.log('Diversification result:', result);
+
+    if (result.success) {
+      return result.data.diversified_recommendations;
+    } else {
+      throw new Error(result.error || 'Unknown diversification error');
+    }
+  } catch (error) {
+    console.error('Diversification error:', error);
+    return entities; // Fallback to original entities
+  } finally {
+    setIsDiversifying(false);
+  }
+};
+
+  const formatResults = (entities: any[]) => {
+  return entities.map(entity => {
+    const city = entity.properties?.geocode?.city;
+    const categoryTag = entity.tags?.find(t => t.type.includes('category'))?.name;
+    const displayType = categoryTag || city || 'Unknown';
+
+    const rating = entity.properties?.business_rating || 0;
+    const fullStars = Math.floor(rating);
+    const halfStar = rating - fullStars >= 0.5;
+    const stars = '★'.repeat(fullStars) + (halfStar ? '½' : '');
+
+    const imageUrl =
+      entity.images?.[0]?.url ||
+      entity.properties?.images?.[0]?.url ||
+      entity.properties?.images?.find(img => img.type === "urn:image:place:unknown")?.url ||
+      null;
+
+    const distanceMiles = entity.query?.distance
+      ? (entity.query.distance / 1609.34).toFixed(1) + ' mi'
+      : null;
+
+    return {
+      name:        entity.name,
+      entityId:    entity.entity_id,
+      type:        displayType,
+      ratingStars: stars,
+      image:       imageUrl,
+      emoji:       imageUrl ? null : '🌟',
+      description: entity.properties?.description,
+      address:     entity.properties?.address,
+      distance:    distanceMiles,
+      affinity:    entity.query?.affinity
+        ? Math.round(entity.query.affinity * 100) + '%'
+        : '—',
+    };
+  });
+};
+
+
   
   const handleQuery = async (
   query: string,
@@ -526,7 +610,26 @@ useEffect(() => {
         new Map(entities.map(e => [e.entity_id, e])).values()
       );
       console.log('Extracted entities:', uniqueEntities);
-      
+      const userPrefs = [
+          ...(userProfile.preferences?.cuisines || []),
+          ...(userProfile.preferences?.culturalInterests || []),
+          query
+        ];
+      // Diversification
+      setResults(uniqueEntities); // render immediately
+      setFormattedRecommendations(formatResults(uniqueEntities));
+      if (diversificationEnabled && uniqueEntities.length > 0) {
+  console.log('Starting background diversification...');
+  diversifyRecommendations(uniqueEntities, userPrefs)
+    .then((diversified) => {
+      console.log('Updated results with diversification.');
+      setResults(diversified);
+      setFormattedRecommendations(formatResults(diversified)); // Replace UI view
+    })
+    .catch(() => {
+      console.warn('Diversification failed, retaining original results.');
+    });
+}
 
       // SPECIAL “nostalgic” branch: shuffle, cache, format & exit
       if (mood === 'nostalgic') {
@@ -1368,7 +1471,14 @@ Instructions:
             {/* AI Chat Interface */}
             <div className="bg-white/10 backdrop-blur-sm rounded-3xl p-6 border border-white/20">
               <h3 className="text-xl font-bold text-white mb-4">What is on your mind today?</h3>
-              
+              <div className="flex items-center space-x-2 mb-4">
+    {isDiversifying && (
+      <div className="flex items-center space-x-1 text-blue-600">
+        <div className="animate-spin w-3 h-3 border border-blue-600 border-t-transparent rounded-full"></div>
+        <span className="text-xs">Diversifying...</span>
+      </div>
+    )}
+  </div>
               {/* Quick Prompt Suggestions */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                   {quickPrompts.map((s, idx) => {

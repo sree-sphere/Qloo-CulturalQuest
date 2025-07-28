@@ -60,5 +60,4 @@ venv/
 # === Project-specific generated or non-source files ===
 api_response.txt
 demp.ipynb
-results_diversified.json
-diversified_results.json
+temp/
