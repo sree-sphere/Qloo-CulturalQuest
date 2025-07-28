@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
     // Use more optimal settings for web playback
     const audioResponse = await elevenlabs.textToSpeech.convert('gs0tAILXbY5DNrJrsM6F', {
       text: text,
-      model_id: 'eleven_multilingual_v2',
+      modelId: 'eleven_multilingual_v2',
       output_format: 'mp3_44100_128', // Good balance of quality and size
       voice_settings: {
         stability: 0.75,
