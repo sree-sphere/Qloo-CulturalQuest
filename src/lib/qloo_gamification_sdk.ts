@@ -3,7 +3,7 @@
 
 import { Qloo } from '@devma/qloo';
 const qloo = new Qloo({
-  apiKey: process.env.NEXT_PUBLIC_QLOO_API_KEY || ''  // 👈 must be accessible client-side
+  apiKey: process.env.NEXT_PUBLIC_QLOO_API_KEY || ''
 });
 if (!process.env.NEXT_PUBLIC_QLOO_API_KEY) {
   console.warn('❗️Missing NEXT_PUBLIC_QLOO_API_KEY in environment');
@@ -214,7 +214,7 @@ export class QlooCulturalGamification {
       filterType: 'urn:entity:place',
       ...signals,
       signalInterestsTags: profile.preferences.culturalInterests.map(ci => `urn:tag:category:${ci}`),
-      filterLocationQuery: 'Austin',
+      filterLocationQuery: profile.location.current,
       // take: 15,
       featureExplainability: true
     });
@@ -223,7 +223,7 @@ export class QlooCulturalGamification {
       filterType: 'urn:entity:place',
       ...signals,
       signalInterestsTags: profile.preferences.cuisines.map(c => `urn:tag:genre:restaurant:${c}`),
-      filterLocationQuery: 'Austin',
+      filterLocationQuery: profile.location.current,
       // take: 15,
       featureExplainability: true
     });
@@ -429,9 +429,10 @@ export class QlooCulturalGamification {
     const location = coordinates || profile.location.coordinates || profile.location.current;
 
     // Weekend planning
-    if (query.toLowerCase().includes('weekend') && query.toLowerCase().includes('austin')) {
-      return await this.getWeekendPlan('Austin', profile);
-    }
+    const locLower = profile.location.current.toLowerCase();
+    if (query.toLowerCase().includes('weekend') && query.toLowerCase().includes(locLower)) {
+      return await this.getWeekendPlan(profile.location.current, profile);
+     }
 
     // Exploration requests
     if (query.toLowerCase().includes('completely new')) {
@@ -479,7 +480,7 @@ export class QlooCulturalGamification {
         sunday: sundayPlan,
         total_recommendations: 15
       },
-      personalization_note: 'Tailored based on your cultural interests and Austin\'s unique vibe'
+      personalization_note: `Tailored based on your cultural interests and ${profile.location.current}’s unique vibe`
     };
   }
 
@@ -609,25 +610,7 @@ export class CulturalAppExample {
     this.gamification = new QlooCulturalGamification(qloo);
   }
 
-  async initializeUser(userId: string) {
-    const profile: UserProfile = {
-      userId,
-      preferences: {
-        cuisines: ['Indian', 'Italian', 'Thai'],
-        culturalInterests: ['heritage', 'traditional', 'spiritual'],
-        travelStyle: 'authentic',
-        nostalgicPeriods: ['traditional', 'colonial']
-      },
-      demographics: {
-        age: '35_and_younger',
-        gender: 'female'
-      },
-      location: {
-        current: 'Austin, Texas',
-        coordinates: 'POINT(-97.7431 30.2672)'
-      }
-    };
-
+  async initializeUser(profile: UserProfile) {
     await this.gamification.createUserProfile(profile);
   }
 

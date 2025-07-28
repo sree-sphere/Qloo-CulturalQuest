@@ -1,19 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-import { Trophy, MapPin, Zap, Star, Gift, Compass, Calendar, Heart } from 'lucide-react';
+import { Trophy, MapPin, Zap, Gift, Compass, Heart } from 'lucide-react';
 import Image from 'next/image';
 
 // Qloo & SDK imports
 import { Qloo } from '@devma/qloo';
-import { QlooCulturalGamification } from '../lib/qloo_gamification_sdk';
+import { QlooCulturalGamification, CulturalAppExample } from '../lib/qloo_gamification_sdk';
 
-// Initialize Qloo and gamification SDK
-const qloo = new Qloo({
-  apiKey: process.env.NEXT_PUBLIC_QLOO_API_KEY || ''  // 👈 must be accessible client-side
-});
+// Qloo and gamification SDK
+const qloo = new Qloo({apiKey: process.env.NEXT_PUBLIC_QLOO_API_KEY || ''});
 const gamification = new QlooCulturalGamification(qloo);
+const app = new CulturalAppExample(qloo);
 
-// Mock user data with corrected location format
+// Initial mock user data
 const mockUser = {
   userId: 'user123',
   name: 'Priya Sharma',
@@ -22,7 +21,7 @@ const mockUser = {
     coordinates: 'POINT(-97.7431 30.2672)'
   },
   demographics: {
-    age: '35_and_younger', // Changed from 29
+    age: '35_and_younger',
     gender: 'female',
     ethnicity: 'Indian',
     religion: 'Hindu',
@@ -120,112 +119,6 @@ const calculateSimilarityScore = (entity1: any, entity2: any): number => {
   return score;
 };
 
-const diversifyRecommendations = (recommendations, userAffinityVector, lambda = 0.7) => {
-  if (recommendations.length <= 3) return recommendations;
-  
-  // Enhanced diversification with semantic similarity
-  const selected = [];
-  const remaining = [...recommendations];
-  
-  // Step 1: Always include top recommendation (highest affinity)
-  selected.push(remaining.shift());
-  
-  // Step 2: Smart MMR-based selection
-  while (selected.length < Math.min(15, recommendations.length) && remaining.length > 0) {
-    let bestScore = -1;
-    let bestIndex = 0;
-    
-    remaining.forEach((candidate, index) => {
-      // Enhanced relevance score
-      const relevanceScore = calculateSemanticAffinity(candidate, userAffinityVector);
-      
-      // Semantic diversity score using content features
-      const diversityScore = selected.length > 0 
-        ? Math.min(...selected.map(sel => calculateSemanticSimilarity(candidate, sel)))
-        : 100;
-      
-      // MMR formula with enhanced features
-      const mmrScore = lambda * relevanceScore - (1 - lambda) * (100 - diversityScore);
-      
-      if (mmrScore > bestScore) {
-        bestScore = mmrScore;
-        bestIndex = index;
-      }
-    });
-    
-    selected.push(remaining.splice(bestIndex, 1)[0]);
-  }
-  
-  return selected;
-};
-
-// Enhanced semantic similarity calculation
-const calculateSemanticSimilarity = (entity1: any, entity2: any): number => {
-  let score = 0;
-  
-  // Cuisine/category similarity
-  const getCuisineFeatures = (entity) => {
-    const type = entity.type?.toLowerCase() || '';
-    const description = entity.description?.toLowerCase() || '';
-    return { type, description };
-  };
-  
-  const features1 = getCuisineFeatures(entity1);
-  const features2 = getCuisineFeatures(entity2);
-  
-  // Exact type match
-  if (features1.type === features2.type) {
-    score += 50;
-  }
-  
-  // Description semantic overlap
-  const words1 = features1.description.split(/\s+/).filter(w => w.length > 3);
-  const words2 = features2.description.split(/\s+/).filter(w => w.length > 3);
-  const commonWords = words1.filter(word => words2.includes(word));
-  score += commonWords.length * 15;
-  
-  // Price range similarity
-  const price1 = entity1.priceRange || 'medium';
-  const price2 = entity2.priceRange || 'medium';
-  if (price1 === price2) score += 20;
-  
-  return Math.min(score, 100);
-};
-
-// Enhanced affinity calculation
-const calculateSemanticAffinity = (entity, affinityVector) => {
-  let score = 50; // base score
-  
-  // Multi-dimensional affinity
-  const features = extractEntityFeatures(entity);
-  
-  Object.entries(features).forEach(([key, value]) => {
-    const affinityKey = `${key}_${value}`;
-    const affinityScore = affinityVector[affinityKey] || 0;
-    score += affinityScore * 25; // Increased weight for learned preferences
-  });
-  
-  // Boost for high ratings
-  const rating = parseFloat(entity.ratingStars?.length || '0');
-  score += rating * 8;
-  
-  // Distance penalty (if available)
-  const distance = parseFloat(entity.distance) || 5;
-  score -= Math.max(0, (distance - 2) * 3); // Penalty after 2 miles
-  
-  return Math.max(0, Math.min(100, score));
-};
-
-// Extract comprehensive entity features
-const extractEntityFeatures = (entity) => {
-  return {
-    cuisine: entity.type?.toLowerCase().replace(/\s+/g, '_') || 'unknown',
-    price: entity.priceRange || 'medium',
-    rating_tier: entity.ratingStars?.length >= 4 ? 'high' : 'medium',
-    distance_tier: parseFloat(entity.distance || '5') <= 2 ? 'nearby' : 'distant'
-  };
-};
-
 const reorderNostalgicRecommendations = (
   recommendations: any[],
   likedIds: Set<string>,
@@ -283,7 +176,6 @@ const formatTime = (timeStr: string) => {
 
 const CulturalGamificationApp = () => {
   useEffect(() => {
-  gamification.registerUserProfile(mockUser);
   const storedLikes = JSON.parse(localStorage.getItem('liked-entities') || '[]');
   setLikedPlaces(new Set(storedLikes));
   
@@ -307,7 +199,34 @@ const CulturalGamificationApp = () => {
 }, []);
   const [activeTab, setActiveTab] = useState('home');
   const [userInput, setUserInput] = useState('');
-  // const [recommendations, setRecommendations] = useState([]);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [userProfile, setUserProfile] = useState(() => {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('qloo-user-profile');
+    return saved
+      ? { ...mockUser, ...JSON.parse(saved) }
+      : mockUser;
+  }
+  return mockUser;
+});
+useEffect(() => {
+    if (userProfile) {
+      app.initializeUser(userProfile);
+    }
+  }, [userProfile]);
+
+  const [profileForm, setProfileForm] = useState({
+  name: mockUser.name,
+  demographics: { age: mockUser.demographics.age, gender: mockUser.demographics.gender, ethnicity: mockUser.demographics.ethnicity, religion: mockUser.demographics.religion, maritalStatus: mockUser.demographics.maritalStatus },
+  location: { current: mockUser.location.current },
+  preferences: {
+    cuisines: mockUser.preferences.cuisines,
+    culturalInterests: mockUser.preferences.culturalInterests,
+    travelStyle: mockUser.preferences.travelStyle,
+    nostalgicPeriods: mockUser.preferences.nostalgicPeriods
+  }
+});
+
   const [showSpinWheel, setShowSpinWheel] = useState(false);
   const [spinResult, setSpinResult] = useState(null);
   const [isSpinning, setIsSpinning] = useState(false);
@@ -320,8 +239,6 @@ const CulturalGamificationApp = () => {
 
 
   const [likedPlaces, setLikedPlaces] = useState<Set<string>>(new Set());
-  const [selectedEntity, setSelectedEntity] = useState<any>(null);
-  const [showEntityDetails, setShowEntityDetails] = useState(false);
   const [isReordering, setIsReordering] = useState(false);
   const [heartAnimation, setHeartAnimation] = useState<string | null>(null);
   const [entityDetails, setEntityDetails] = useState<any>(null);
@@ -332,19 +249,47 @@ const CulturalGamificationApp = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
   const [isVideoPlaying, setIsVideoPlaying] = useState(false);
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null);
+  const [showPhoto, setShowPhoto] = useState(true);
+
+  // Buffer for accumulating text chunks
+  const [textBuffer, setTextBuffer] = useState('');
+  const [lastProcessedLength, setLastProcessedLength] = useState(0);
 
   const [redeemAnimations, setRedeemAnimations] = useState<{[key: string]: boolean}>({});
   const [quickPromptLoading, setQuickPromptLoading] = useState<string | null>(null);
   const [userAffinityVector, setUserAffinityVector] = useState<Record<string, number>>({});
 
-useEffect(() => {
-  if (typeof window !== 'undefined') {
-    localStorage.setItem('user-affinity', JSON.stringify(userAffinityVector));
-  }
-}, [userAffinityVector]);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('user-affinity', JSON.stringify(userAffinityVector));
+    }
+  }, [userAffinityVector]);
 
   const [userPoints, setUserPoints] = useState(mockUser.points);
   const [userLevel, setUserLevel] = useState(mockUser.level);
+  const [showAltSubtitle, setShowAltSubtitle] = useState(false);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setShowAltSubtitle(prev => !prev);
+    }, 6000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const [subtitleIndex, setSubtitleIndex] = useState(0);
+  const subtitles = [
+    `Level ${userLevel} Cultural Explorer • ${userProfile.currentStreak.count} day streak`,
+    "Ready for your next cultural adventure?"
+  ];
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSubtitleIndex((prev) => (prev + 1) % subtitles.length);
+    }, 6000);
+    return () => clearInterval(interval);
+  }, [userLevel, userProfile.currentStreak.count]);
+
+
   const [conversationHistory, setConversationHistory] = useState<Array<{role: string, content: string}>>([]);
   // Load conversation history on mount
   useEffect(() => {
@@ -354,77 +299,103 @@ useEffect(() => {
     }
   }, []);
   useEffect(() => {
-  const newLevel = Math.floor(userPoints / 1000) + 1;
-  setUserLevel(newLevel);
-}, [userPoints]);
+    const newLevel = Math.floor(userPoints / 1000) + 1;
+    setUserLevel(newLevel);
+  }, [userPoints]);
+
+  const getUserGreeting = (userProfile: typeof mockUser, userLevel: number) => {
+    const timeOfDay = new Date().getHours();
+    const greeting =
+      timeOfDay < 12 ? 'Good morning' :
+      timeOfDay < 18 ? 'Good afternoon' :
+      'Good evening';
+
+    const culturalGreetings: Record<string, string> = {
+      'Hispanic': timeOfDay < 12 ? 'Buenos días' : timeOfDay < 18 ? 'Buenas tardes' : 'Buenas noches',
+      'Chinese': timeOfDay < 12 ? '早上好' : timeOfDay < 18 ? '下午好' : '晚上好',
+      'Japanese': timeOfDay < 12 ? 'おはようございます' : timeOfDay < 18 ? 'こんにちは' : 'こんばんは',
+      'Korean': timeOfDay < 12 ? '좋은 아침입니다' : timeOfDay < 18 ? '좋은 점심입니다' : '좋은 저녁입니다',
+      'Indian': timeOfDay < 12 ? 'सुप्रभात' : timeOfDay < 18 ? 'नमस्ते' : 'शुभ रात्रि',
+      'Spanish': timeOfDay < 12 ? 'Buenos días' : timeOfDay < 18 ? 'Buenas tardes' : 'Buenas noches',
+      'French': timeOfDay < 12 ? 'Bonjour' : timeOfDay < 18 ? 'Bon après-midi' : 'Bonsoir',
+      'English': timeOfDay < 12 ? 'Good morning' : timeOfDay < 18 ? 'Good afternoon' : 'Good evening',
+      'default': greeting
+    };
+
+    const ethnicity = userProfile?.demographics?.ethnicity;
+    const culturalGreeting = culturalGreetings[ethnicity] || culturalGreetings.default;
+
+    return {
+      greeting: culturalGreeting
+    };
+  };
+
+  const {greeting} = getUserGreeting(userProfile, userLevel);
 
   const handleImageError = (entityId: string) => {
     setImageErrors(prev => new Set([...prev, entityId]));
   };
 
   // Update affinity when user interacts
-const updateUserAffinity = (entityId, interaction) => {
-  const entity = formattedRecommendations.find(r => r.entityId === entityId);
-  if (!entity) return;
-  
-  // Extract features from entity
-  const features = {
-    cuisine: entity.type.toLowerCase(),
-    priceRange: entity.priceRange || 'medium',
-    rating: parseFloat(entity.ratingStars.length),
-    distance: parseFloat(entity.distance) || 5
-  };
-  
-  // Update affinity vector with learning rate
-  const learningRate = interaction === 'like' ? 0.1 : -0.05;
-  
-  setUserAffinityVector(prev => {
-    const updated = { ...prev };
-    Object.entries(features).forEach(([key, value]) => {
-      if (typeof value === 'string') {
-        updated[`${key}_${value}`] = (updated[`${key}_${value}`] || 0) + learningRate;
-      } else {
-        updated[key] = (updated[key] || 0) + learningRate * value;
-      }
-    });
+  const updateUserAffinity = (entityId, interaction) => {
+    const entity = formattedRecommendations.find(r => r.entityId === entityId);
+    if (!entity) return;
     
-    localStorage.setItem('user-affinity', JSON.stringify(updated));
-    return updated;
-  });
-};
+    // Extract features from entity
+    const features = {
+      cuisine: entity.type.toLowerCase(),
+      priceRange: entity.priceRange || 'medium',
+      rating: parseFloat(entity.ratingStars.length),
+      distance: parseFloat(entity.distance) || 5
+    };
+    
+    // Update affinity vector with learning rate
+    const learningRate = interaction === 'like' ? 0.1 : -0.05;
+    
+    setUserAffinityVector(prev => {
+      const updated = { ...prev };
+      Object.entries(features).forEach(([key, value]) => {
+        if (typeof value === 'string') {
+          updated[`${key}_${value}`] = (updated[`${key}_${value}`] || 0) + learningRate;
+        } else {
+          updated[key] = (updated[key] || 0) + learningRate * value;
+        }
+      });
+      
+      localStorage.setItem('user-affinity', JSON.stringify(updated));
+      return updated;
+    });
+  };
 
   const handleLearnMore = async (entityId: string) => {
-  try {
-    // Get full API data from localStorage
-    const fullApiData = JSON.parse(localStorage.getItem('full-api-responses') || '[]');
-    const entity = fullApiData.find(e => e.entity_id === entityId);
-    if (entity) {
-      // Create enhanced entity details
+    try {
+      const fullApiData = JSON.parse(localStorage.getItem('full-api-responses') || '[]');
+      console.log('Entity ID:', entityId, 'Full API Data:', fullApiData); // Debug
+      const entity = fullApiData.find(e => e.entity_id === entityId);
+      if (!entity) {
+        setError('Entity details not found. Try refreshing recommendations.');
+        return;
+      }
       const enhancedDetails = {
         ...entity,
-        // Format hours for display
         formattedHours: entity.properties?.hours ? Object.entries(entity.properties.hours).map(([day, times]) => ({
           day,
           times: times.map(t => `${formatTime(t.opens)} - ${formatTime(t.closes)}`).join(', ')
         })) : [],
-        // Extract amenities
         amenities: entity.tags?.filter(t => t.type.includes('amenity')).map(t => t.name) || [],
-        // Extract offerings
         offerings: entity.tags?.filter(t => t.type.includes('offerings')).map(t => t.name) || [],
-        // Extract specialty dishes
         specialtyDishes: entity.properties?.specialty_dishes?.map(d => d.name) || [],
-        // Format price range
         priceRange: entity.properties?.price_range ? 
           `$${entity.properties.price_range.from}-${entity.properties.price_range.to}` : null
       };
-      
       setEntityDetails(enhancedDetails);
       setShowEntityModal(true);
+      console.log('Modal opened:', enhancedDetails, showEntityModal); // Debug
+    } catch (error) {
+      console.error('Error loading entity details:', error);
+      setError('Failed to load details. Please try again.');
     }
-  } catch (error) {
-    console.error('Error loading entity details:', error);
-  }
-};
+  };
   
   const quickPrompts = [
       {
@@ -436,7 +407,7 @@ const updateUserAffinity = (entityId, interaction) => {
         cacheKey: 'nostalgic-recs'
       },
       {
-        prompt: "Plan my weekend in Austin",
+        prompt: (profile: typeof userProfile) => `Plan my weekend in ${userProfile.location.current || 'your area'}`,
         icon:   "📅",
         color:  "from-blue-500 to-cyan-500",
         mood:   'social',
@@ -470,7 +441,7 @@ const updateUserAffinity = (entityId, interaction) => {
 
     localStorage.setItem('liked-entities', JSON.stringify(Array.from(next)));
 
-    // 🔄 Generic reordering logic for any mode (if cache exists)
+    // Generic reordering logic for any mode (if cache exists)
     const contextCacheKey = `recs-${currentMode}`;
     const cachedContext = localStorage.getItem(contextCacheKey);
     if (cachedContext) {
@@ -522,16 +493,17 @@ const updateUserAffinity = (entityId, interaction) => {
     try {
       setIsLoading(true);
 
-      if (!gamification.userProfiles.has(mockUser.userId)) {
+      if (!gamification.userProfiles.has(userProfile.userId)) {
         await gamification.createUserProfile(mockUser);
       }
 
       const recPayload = await gamification.getContextualRecommendations(
-        mockUser.userId,
+        userProfile.userId,
         prompt,
-        mockUser.location.current
+        userProfile.location.current
       );
       console.log('API response:', recPayload);
+      localStorage.setItem('full-api-responses', JSON.stringify(recPayload.entities || []));
       
       // Raw entity extraction
       // Dynamically extract entities based on response structure / forcedIntent
@@ -601,8 +573,8 @@ const updateUserAffinity = (entityId, interaction) => {
   return;
 }
       
-      // “Plan my weekend in Austin” chat branch
-      if (intent === 'discover' && mood === 'social') {
+      // “Plan my weekend in ___ chat branch
+      if (intent === 'discover' || mood === 'social') {
   // 1) filter for weekend‑open & vegetarian
   const weekendOpen = uniqueEntities.filter(e => {
     const hrs = e.properties?.hours || {};
@@ -625,17 +597,17 @@ const updateUserAffinity = (entityId, interaction) => {
     const sunHours = e.properties.hours?.Sunday?.[0];
     
     return `
-- ${e.name}
-  • ${e.properties?.address || 'Address not available'}
-  • Hours: Sat ${formatTime(satHours?.opens)}–${formatTime(satHours?.closes)}, Sun ${formatTime(sunHours?.opens)}–${formatTime(sunHours?.closes)}
-  • ${e.properties?.description || 'No description available'}
-`;
-  }).join('\n');
-  
-  // 4) invoke chat
-  await handleChat(`Plan my weekend in Austin. Here are some vegetarian-friendly options that are open on weekends:${summary}`);
-  return;
-}
+    - ${e.name}
+      • ${e.properties?.address || 'Address not available'}
+      • Hours: Sat ${formatTime(satHours?.opens)}–${formatTime(satHours?.closes)}, Sun ${formatTime(sunHours?.opens)}–${formatTime(sunHours?.closes)}
+      • ${e.properties?.description || 'No description available'}
+    `;
+      }).join('\n');
+      
+      // 4) invoke chat
+      await handleChat(`Plan my weekend in ${userProfile.location.current}. Here are some vegetarian-friendly options that are open on weekends:${summary}`);
+      return;
+    }
       
       // Default “discover” / other moods → map & render cards
       const formattedRecommendations = uniqueEntities.map(entity => {
@@ -708,10 +680,201 @@ const updateUserAffinity = (entityId, interaction) => {
   }
 };
 
+const playTextToSpeech = async (text: string) => {
+  try {
+    setIsPlayingAudio(true);
+    setShowPhoto(true);
+    
+    // Stop any currently playing audio
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+      currentAudio.removeEventListener('ended', handleAudioEnd);
+      currentAudio.removeEventListener('error', handleAudioError);
+    }
+
+    console.log('Starting TTS for:', text.substring(0, 50) + '...');
+
+    // Call our server-side TTS API
+    const response = await fetch('/api/tts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ text: text }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`TTS API failed: ${response.status}`);
+    }
+
+    console.log('TTS API response received');
+
+    // Get the audio blob from the response
+    const audioBlob = await response.blob();
+    const audioUrl = URL.createObjectURL(audioBlob);
+    console.log('Audio URL created:', audioUrl);
+    
+    const audio = new Audio(audioUrl);
+    
+    // Set volume and preload
+    audio.volume = 1.0;
+    audio.preload = 'auto';
+    
+    setCurrentAudio(audio);
+
+    // Define event handlers to avoid multiple bindings
+    const handleAudioEnd = () => {
+      console.log('Audio playback ended');
+      setIsPlayingAudio(false);
+      
+      // Show photo and stop video after audio ends
+      setTimeout(() => {
+        setShowPhoto(true);
+        if (videoRef.current && !isStreaming) {
+          videoRef.current.pause();
+          setIsVideoPlaying(false);
+        }
+      }, 2000);
+      
+      URL.revokeObjectURL(audioUrl);
+      setCurrentAudio(null);
+    };
+
+    const handleAudioError = (e: any) => {
+      console.error('Audio error:', e);
+      setIsPlayingAudio(false);
+      if (videoRef.current) {
+        videoRef.current.pause();
+        setIsVideoPlaying(false);
+      }
+      URL.revokeObjectURL(audioUrl);
+      setCurrentAudio(null);
+    };
+
+    // Add event listeners with proper cleanup
+    audio.addEventListener('loadstart', () => console.log('Audio loading started'));
+    audio.addEventListener('canplay', () => console.log('Audio can start playing'));
+    audio.addEventListener('playing', () => {
+      console.log('Audio is playing');
+      setShowPhoto(false); // Hide photo, show video
+      if (videoRef.current && videoRef.current.paused) {
+        videoRef.current.play().catch(console.log);
+      }
+    });
+    audio.addEventListener('error', handleAudioError, { once: true });
+    audio.addEventListener('ended', handleAudioEnd, { once: true });
+
+    // Load the audio and wait for it to be ready
+    audio.load();
+    
+    // Wait for audio to be ready to play
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Audio load timeout'));
+      }, 6000);
+
+      audio.addEventListener('canplaythrough', () => {
+        clearTimeout(timeout);
+        resolve(true);
+      }, { once: true });
+
+      audio.addEventListener('error', () => {
+        clearTimeout(timeout);
+        reject(new Error('Audio load failed'));
+      }, { once: true });
+    });
+    
+    // Play audio
+    await audio.play();
+    console.log('Audio playbook started');
+
+  } catch (error) {
+    console.error('Error playing TTS:', error);
+    setIsPlayingAudio(false);
+    setShowPhoto(true); // Show photo on error
+    if (videoRef.current) {
+      videoRef.current.pause();
+      setIsVideoPlaying(false);
+    }
+  }
+};
+
+// Fixed video event handlers
+const handleVideoLoadedData = () => {
+  const video = videoRef.current;
+  if (video) {
+    video.playbackRate = 0.9;
+    video.currentTime = 0;
+    video.volume = 0.3;
+    video.muted = false;
+    
+    // Don't auto-start video, wait for audio
+    if (isPlayingAudio) {
+      setShowPhoto(false); // Hide photo when starting video
+      setIsVideoPlaying(true);
+      playVideoSafely();
+    }
+  }
+};
+
+const playVideoSafely = async () => {
+  const video = videoRef.current;
+  if (!video) return;
+
+  try {
+    if (video.paused && !showPhoto) {
+      await video.play();
+      console.log('Video playing successfully');
+      setIsVideoPlaying(true);
+    }
+  } catch (error) {
+    console.warn('Video play failed, will retry...', error);
+    setTimeout(() => {
+      if (video && (isStreaming || isPlayingAudio) && video.paused && !showPhoto) {
+        playVideoSafely();
+      }
+    }, 200);
+  }
+};
+
+const handleVideoEnded = () => {
+  const video = videoRef.current;
+  if (video && (isStreaming || isPlayingAudio) && !showPhoto) {
+    video.currentTime = 0;
+    playVideoSafely();
+  } else if (!isPlayingAudio && !isStreaming) {
+    setShowPhoto(true); // Show photo when video stops
+    setIsVideoPlaying(false);
+  }
+};
+
+const handleVideoError = (error: any) => {
+  console.log('Video error:', error);
+  const video = videoRef.current;
+  
+  if (video && (isStreaming || isPlayingAudio)) {
+    // Try to recover from error
+    setTimeout(() => {
+      video.load();
+      setTimeout(() => {
+        if (isStreaming || isPlayingAudio) {
+          playVideoSafely();
+        }
+      }, 200);
+    }, 500);
+  } else {
+    setIsVideoPlaying(false);
+  }
+};
+
   // Update the handleChat function with better context:
 const handleChat = async (message: string) => {
   setChatOutput('');
   setIsStreaming(true);
+  setTextBuffer('');
+  setLastProcessedLength(0);
+  setShowPhoto(true);
 
   // Add to conversation history
   const newHistory = [...conversationHistory, { role: 'user', content: message }];
@@ -724,44 +887,65 @@ const handleChat = async (message: string) => {
   
   // Start video when streaming begins
   if (videoRef.current) {
-    videoRef.current.currentTime = 0;
-    videoRef.current.play();
+    const video = videoRef.current;
+    video.currentTime = 0;
+    setIsVideoPlaying(true);
   }
 
   // Enhanced context with full API response data
   let contextMessage = message;
   let apiContext = '';
 
-  // Build rich context from current recommendations
   if (formattedRecommendations.length > 0) {
-    // Store the full API responses for context
     const fullApiData = JSON.parse(localStorage.getItem('full-api-responses') || '[]');
-    
-    apiContext = fullApiData.map(entity => `
-Entity: ${entity.name} (${entity.entity_id})
-- Type: ${entity.type}
-- Description: ${entity.properties?.description || 'No description'}
-- Address: ${entity.properties?.address || 'No address'}
-- Rating: ${entity.properties?.business_rating || 'No rating'}
-- Phone: ${entity.properties?.phone || 'No phone'}
-- Website: ${entity.properties?.website || 'No website'}
-- Menu: ${entity.properties?.menu_url || 'No menu'}
-- Hours: ${JSON.stringify(entity.properties?.hours || {})}
-- Specialty Dishes: ${entity.properties?.specialty_dishes?.map(d => d.name).join(', ') || 'None'}
-- Price Range: $${entity.properties?.price_range?.from}-${entity.properties?.price_range?.to} ${entity.properties?.price_range?.currency || ''}
-- Good For: ${entity.properties?.good_for?.map(g => g.name).join(', ') || 'General dining'}
-- Amenities: ${entity.tags?.filter(t => t.type.includes('amenity')).map(t => t.name).join(', ') || 'None'}
-- Offerings: ${entity.tags?.filter(t => t.type.includes('offerings')).map(t => t.name).join(', ') || 'None'}
-    `).join('\n\n');
+
+    apiContext = fullApiData.map(entity => {
+      const lines = [
+        `Entity: ${entity.name} (${entity.entity_id})`,
+        entity.properties?.description && `- Description: ${entity.properties.description}`,
+        entity.properties?.address && `- Address: ${entity.properties.address}`,
+        entity.properties?.business_rating && `- Rating: ${entity.properties.business_rating}`,
+        entity.properties?.phone && `- Phone: ${entity.properties.phone}`,
+        entity.properties?.website && `- Website: ${entity.properties.website}`,
+        entity.properties?.menu_url && `- Menu: ${entity.properties.menu_url}`,
+        entity.properties?.hours && Object.keys(entity.properties.hours).length > 0 &&
+          `- Hours: ${JSON.stringify(entity.properties.hours)}`,
+        entity.properties?.specialty_dishes?.length > 0 &&
+          `- Specialty Dishes: ${entity.properties.specialty_dishes.map(d => d.name).join(', ')}`,
+        entity.properties?.price_range?.from && entity.properties?.price_range?.to &&
+          `- Price Range: $${entity.properties.price_range.from}-${entity.properties.price_range.to} ${entity.properties.price_range.currency || ''}`,
+        entity.properties?.good_for?.length > 0 &&
+          `- Good For: ${entity.properties.good_for.map(g => g.name).join(', ')}`,
+        entity.tags?.filter(t => t.type.includes('amenity')).length > 0 &&
+          `- Amenities: ${entity.tags.filter(t => t.type.includes('amenity')).map(t => t.name).join(', ')}`,
+        entity.tags?.filter(t => t.type.includes('offerings')).length > 0 &&
+          `- Offerings: ${entity.tags.filter(t => t.type.includes('offerings')).map(t => t.name).join(', ')}`,
+      ];
+
+      // Remove falsy/null/undefined lines
+      return lines.filter(Boolean).join('\n');
+    }).join('\n\n');
   }
 
-  // Build comprehensive context message
-  contextMessage = `You are Sahayak, a friendly cultural tour guide for Austin. 
-  
+  const userContext = `
+User Profile: ${userProfile.name}
+- Age: ${userProfile.demographics.age}
+- Gender: ${userProfile.demographics.gender}
+- Ethnicity: ${userProfile.demographics.ethnicity}
+- Vegetarian: ${userProfile.preferences.isVegetarian}
+- Preferred Cuisines: ${userProfile.preferences.cuisines.join(', ')}
+- Cultural Interests: ${userProfile.preferences.culturalInterests.join(', ')}
+- Travel Style: ${userProfile.preferences.travelStyle}
+- Current Streak: ${userProfile.currentStreak.count} days of ${userProfile.currentStreak.type}
+`;
+
+  contextMessage = `You are Sahayak, a friendly cultural guide for new migrants to ${userProfile?.location?.current || 'their city'}. 
+${userContext}
+
 User Query: ${message}
 
-Previous Conversation (last 6 exchanges):
-${conversationHistory.slice(-6).map(h => `${h.role}: ${h.content}`).join('\n')}
+Previous Conversation (last 4 exchanges):
+${conversationHistory.slice(-4).map(h => `${h.role}: ${h.content}`).join('\n')}
 
 Current Recommendations Context:
 ${apiContext}
@@ -771,12 +955,15 @@ Current time: ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute
 
 Instructions:
 - Reference previous conversation naturally
+- Reference user's cultural background (${userProfile.demographics.ethnicity}) and preferences naturally
 - Use specific details from the API data when discussing places
 - Include hours, menu items, prices, and amenities when relevant
 - Be conversational and helpful
+- Acknowledge their ${userProfile.currentStreak.count}-day exploration streak
+- Use their travel style (${userProfile.preferences.travelStyle}) to tailor recommendations
 - If asked about specific dishes, use the specialty_dishes data
 - If asked about timing, reference the hours data
-- Keep responses concise but informative`;
+- Keep responses concise but informative (under 200 words for TTS)`;
 
   const res = await fetch('/api/chat', {
     method: 'POST',
@@ -790,7 +977,7 @@ Instructions:
   const decoder = new TextDecoder();
   let done = false;
   let responseContent = '';
-
+  let ttsStarted = false;
   let partial = '';
   while (!done) {
     const { value, done: doneReading } = await reader.read();
@@ -804,7 +991,10 @@ Instructions:
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue;
       const json = line.slice('data: '.length);
-      if (json === '[DONE]') break;
+      if (json === '[DONE]') {
+        done = true;
+        break;
+      }
 
       try {
         const parsed = JSON.parse(json);
@@ -814,58 +1004,258 @@ Instructions:
           setChatOutput((prev) => prev + token);
         }
       } catch {
-        continue;
+        // malformed line, skip
       }
     }
   }
+
+  // streaming is done
+  setIsStreaming(false);
+
+  // play the full text
+  playTextToSpeech(responseContent);
 
   // Add assistant response to history
   const finalHistory = [...newHistory, { role: 'assistant', content: responseContent }];
   setConversationHistory(finalHistory);
   localStorage.setItem('conversation-history', JSON.stringify(finalHistory));
+  
+  // If no TTS and no audio, stop video after streaming ends
+  if (!ttsStarted && !isPlayingAudio) {
+      setTimeout(() => {
+        if (videoRef.current && !isPlayingAudio) {
+          videoRef.current.pause();
+          setIsVideoPlaying(false);
+        }
+      }, 1000);
+    }
+  };
 
-  setIsStreaming(false);
-  // Pause video when streaming ends
-  if (videoRef.current) {
-    videoRef.current.pause();
-  }
-};
+  // Add cleanup when component unmounts
+  useEffect(() => {
+    return () => {
+      // Cleanup audio on unmount
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.removeEventListener('ended', () => {});
+        currentAudio.removeEventListener('error', () => {});
+        URL.revokeObjectURL(currentAudio.src);
+      }
+      
+      // Cleanup video on unmount
+      if (videoRef.current) {
+        videoRef.current.pause();
+      }
+    };
+  }, [currentAudio]);
 
   const handleSpin = () => {
-  if (userPoints < 100) return;
-  
-  setIsSpinning(true);
-  
-  // Deduct points immediately
-  const newPoints = userPoints - 100;
-  setUserPoints(newPoints);
-  
-  setTimeout(() => {
-    const rewards = [
-      { type: 'discount', value: '15% off', description: '15% off next booking', points: 0 },
-      { type: 'points', value: '500', description: '500 culture points', points: 500 },
-      { type: 'experience', value: 'guide', description: 'Free cultural guide', points: 0 }
-    ];
-    const reward = rewards[Math.floor(Math.random() * rewards.length)];
+    if (userPoints < 100) return;
     
-    // Add bonus points if reward is points
-    if (reward.points > 0) {
-      setUserPoints(prev => prev + reward.points);
-    }
+    setIsSpinning(true);
     
-    setSpinResult(reward);
-    setIsSpinning(false);
-  }, 3000);
-};
+    // Deduct points immediately
+    const newPoints = userPoints - 100;
+    setUserPoints(newPoints);
+    
+    setTimeout(() => {
+      const rewards = [
+        { type: 'discount', value: '15% off', description: '15% off next booking', points: 0 },
+        { type: 'points', value: '500', description: '500 culture points', points: 500 },
+        { type: 'experience', value: 'guide', description: 'Free cultural guide', points: 0 }
+      ];
+      const reward = rewards[Math.floor(Math.random() * rewards.length)];
+      
+      // Add bonus points if reward is points
+      if (reward.points > 0) {
+        setUserPoints(prev => prev + reward.points);
+      }
+      
+      setSpinResult(reward);
+      setIsSpinning(false);
+    }, 4000);
+  };
 
   const getProgressPercentage = () => {
-    const nextLevelPoints = mockUser.level * 1000;
+    const nextLevelPoints = userProfile.level * 1000;
     const currentLevelProgress = userPoints % 1000;
   return (currentLevelProgress / 1000) * 100;
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-indigo-900 to-pink-900">
+      {showProfileModal && (
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
+          onClick={() => setShowProfileModal(false)}
+        >
+          <form
+            onClick={e => e.stopPropagation()}
+            onSubmit={e => {
+        e.preventDefault();
+        localStorage.setItem('qloo-user-profile', JSON.stringify(profileForm));
+        const updated = {
+          ...userProfile,
+          ...profileForm,
+          location: { ...userProfile.location, current: profileForm.location.current },
+          preferences: { ...userProfile.preferences, ...profileForm.preferences }
+        };
+        gamification.registerUserProfile(updated);
+        setUserProfile(prev => ({ ...prev, ...profileForm }));
+        setShowProfileModal(false);
+      }}
+            className="bg-white/10 backdrop-blur-md rounded-2xl p-8 w-full max-w-lg space-y-6 transform scale-95 opacity-0 animate-modal-in"
+          >
+      <h2 className="text-2xl font-bold">Edit Your Profile</h2>
+
+      {/* Name */}
+      <div>
+        <label className="block text-sm font-medium mb-1">Name</label>
+        <input
+          type="text"
+          value={profileForm.name}
+          onChange={e => setProfileForm(f => ({ ...f, name: e.target.value }))}
+          className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-indigo-300"
+        />
+      </div>
+
+      {/* Age & Gender */}
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium mb-1">Age</label>
+          <select
+            value={profileForm.demographics.age}
+            onChange={e => setProfileForm(f => ({
+              ...f,
+              demographics: { ...f.demographics, age: e.target.value }
+            }))}
+            className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-indigo-300"
+          >
+            <option value="35_and_younger">35 and younger</option>
+            <option value="36_to_55">36 to 55</option>
+            <option value="55_and_older">55 and older</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">Gender</label>
+          <select
+            value={profileForm.demographics.gender}
+            onChange={e => setProfileForm(f => ({
+              ...f,
+              demographics: { ...f.demographics, gender: e.target.value }
+            }))}
+            className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-indigo-300"
+          >
+            <option value="female">Female</option>
+            <option value="male">Male</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Ethnicity / Cultural Background */}
+      <div>
+        <label className="block text-sm font-medium mb-1">Cultural Background</label>
+        <select
+          value={profileForm.demographics.ethnicity}
+          onChange={e =>
+            setProfileForm(f => ({
+              ...f,
+              demographics: { ...f.demographics, ethnicity: e.target.value }
+            }))
+          }
+          className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-indigo-300"
+        >
+          <option value="">Select one...</option>
+          <option value="Hispanic">Hispanic / Latino</option>
+          <option value="Chinese">Chinese</option>
+          <option value="Japanese">Japanese</option>
+          <option value="Korean">Korean</option>
+          <option value="Indian">Indian</option>
+          <option value="Spanish">Spanish</option>
+          <option value="French">French</option>
+          <option value="English">English</option>
+          <option value="Other">Other / Prefer not to say</option>
+        </select>
+      </div>
+
+      {/* Location */}
+      <div>
+        <label className="block text-sm font-medium mb-1">Current Location</label>
+        <input
+          type="text"
+          value={profileForm.location.current}
+          onChange={e => setProfileForm(f => ({
+            ...f,
+            location: { current: e.target.value }
+          }))}
+          className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-indigo-300"
+          placeholder="e.g. Austin, TX"
+        />
+      </div>
+
+      {/* Multi‑select tags: cuisines, culturalInterests, nostalgicPeriods */}
+      {[
+        { key: 'cuisines', label: 'Favorite Cuisines' },
+        { key: 'culturalInterests', label: 'Cultural Interests' },
+        { key: 'nostalgicPeriods', label: 'Nostalgic Periods' }
+      ].map(({ key, label }) => (
+        <div key={key}>
+          <label className="block text-sm font-medium mb-1">{label}</label>
+          <input
+            type="text"
+            value={(profileForm.preferences as any)[key].join(', ')}
+            onChange={e => {
+              const arr = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
+              setProfileForm(f => ({
+                ...f,
+                preferences: { ...f.preferences, [key]: arr }
+              }));
+            }}
+            className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-indigo-300"
+            placeholder={`e.g. Indian, Thai, Italian`}
+          />
+          <p className="text-xs text-gray-500 mt-1">Comma‑separated</p>
+        </div>
+      ))}
+
+      {/* Travel Style */}
+      <div>
+        <label className="block text-sm font-medium mb-1">Travel Style</label>
+        <select
+          value={profileForm.preferences.travelStyle}
+          onChange={e => setProfileForm(f => ({
+            ...f,
+            preferences: { ...f.preferences, travelStyle: e.target.value }
+          }))}
+          className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-indigo-300"
+        >
+          <option value="budget">Budget</option>
+          <option value="luxury">Luxury</option>
+          <option value="authentic">Authentic</option>
+          <option value="modern">Modern</option>
+        </select>
+      </div>
+
+      {/* Buttons */}
+      <div className="flex justify-end space-x-4">
+        <button
+          type="button"
+          onClick={() => setShowProfileModal(false)}
+          className="px-6 py-2 rounded-lg hover:bg-gray-300 transition"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          className="px-6 py-2 rounded-lg bg-teal-600 text-white hover:bg-indigo-700 transition"
+        >
+          Save
+        </button>
+      </div>
+    </form>
+  </div>
+)}
       {/* Header */}
       <div className="bg-black/20 backdrop-blur-sm border-b border-white/10 sticky top-0 z-50">
         <div className="max-w-6xl mx-auto px-4 py-4">
@@ -888,13 +1278,13 @@ Instructions:
             
             <div className="flex items-center space-x-6">
               <div className="flex items-center space-x-2 bg-white/10 backdrop-blur-sm rounded-full px-4 py-2">
-  <Zap className="w-4 h-4 text-yellow-400" />
-  <span className="text-white font-semibold">{userPoints.toLocaleString()}</span>
-</div>
-              <div className="flex items-center space-x-2 bg-white/10 backdrop-blur-sm rounded-full px-4 py-2">
-  <Trophy className="w-4 h-4 text-yellow-400" /> {/* Using standard Tailwind class */}
-  <span className="text-white font-semibold">Level {userLevel}</span>
-</div>
+                <Zap className="w-4 h-4 text-yellow-400" />
+                <span className="text-white font-semibold">{userPoints.toLocaleString()}</span>
+              </div>
+                            <div className="flex items-center space-x-2 bg-white/10 backdrop-blur-sm rounded-full px-4 py-2">
+                <Trophy className="w-4 h-4 text-yellow-400" /> {/* Using standard Tailwind class */}
+                <span className="text-white font-semibold">Level {userLevel}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -931,22 +1321,33 @@ Instructions:
         {activeTab === 'home' && (
           <div className="space-y-6">
             {/* User Greeting & Context */}
-            <div className="bg-white/10 backdrop-blur-sm rounded-3xl p-6 border border-white/20">
+            <div className="relative bg-white/10 backdrop-blur-sm rounded-3xl p-6 border border-white/20">
+              <button
+                onClick={() => setShowProfileModal(true)}
+                className="absolute top-4 right-4 text-white bg-white/10 hover:bg-white/20 px-3 py-1 rounded-full text-sm transition transform hover:scale-105">
+                ✏️ Edit Profile
+              </button>
               <div className="flex items-center space-x-4 mb-4">
                 <div className="w-16 h-16 bg-gradient-to-r from-pink-500 to-orange-500 rounded-full flex items-center justify-center text-2xl">
                   👋
                 </div>
                 <div>
-                  <h2 className="text-2xl font-bold text-white">Welcome back, {mockUser.name}!</h2>
-                  <p className="text-purple-200">Ready for your next cultural adventure?</p>
+                  <h2 className="text-2xl font-bold text-white">{greeting}, {userProfile.name}!</h2>
+                  <div className="relative min-h-[1.5em] py-1 max-w-full">
+                    <div className="transition-all duration-700 ease-in-out animate-fade-slide absolute inset-0">
+                      <p className="text-purple-200 whitespace-nowrap overflow-visible text-ellipsis">
+                        {subtitles[subtitleIndex]}
+                      </p>
+                    </div>
+                  </div>
                   <div className="flex items-center space-x-4 mt-2">
                     <div className="flex items-center space-x-1">
                       <Heart className="w-4 h-4 text-red-400" />
-                      <span className="text-sm text-purple-200">{mockUser.currentStreak.count} day streak</span>
+                      <span className="text-sm text-purple-200">{userProfile.currentStreak.count} day streak</span>
                     </div>
                     <div className="flex items-center space-x-1">
                       <MapPin className="w-4 h-4 text-blue-400" />
-                      <span className="text-sm text-purple-200">Austin, TX</span>
+                      <span className="text-sm text-purple-200">{userProfile.location.current}</span>
                     </div>
                   </div>
                 </div>
@@ -959,8 +1360,8 @@ Instructions:
                 />
               </div>
               <p className="text-sm text-purple-200 mt-2">
-{(userLevel * 1000 - userPoints).toLocaleString()} points to level {userLevel + 1}
-</p>
+              {(userLevel * 1000 - userPoints).toLocaleString()} points to level {userLevel + 1}
+              </p>
             </div>
 
             {/* AI Chat Interface */}
@@ -968,43 +1369,47 @@ Instructions:
               <h3 className="text-xl font-bold text-white mb-4">What is on your mind today?</h3>
               
               {/* Quick Prompt Suggestions */}
-<div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-  {quickPrompts.map((s, idx) => (
-    <button
-      key={idx}
-      onClick={async () => {
-        setQuickPromptLoading(s.prompt);
-        setUserInput(s.prompt);
-        
-        try {
-          if (s.mood === 'nostalgic') {
-            await loadNostalgic();
-          } else {
-            await handleQuery(s.prompt, s.mood, s.intent);
-          }
-        } finally {
-          setQuickPromptLoading(null);
-        }
-      }}
-      disabled={quickPromptLoading === s.prompt}
-      className={`bg-gradient-to-r ${s.color} rounded-2xl p-6 text-white hover:scale-105 transition-all duration-200 relative ${
-        quickPromptLoading === s.prompt ? 'opacity-75' : ''
-      }`}
-    >
-      {quickPromptLoading === s.prompt && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded-2xl">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
-        </div>
-      )}
-      <div className={`text-2xl mb-2 ${quickPromptLoading === s.prompt ? 'opacity-50' : ''}`}>
-        {s.icon}
-      </div>
-      <p className={`font-medium ${quickPromptLoading === s.prompt ? 'opacity-50' : ''}`}>
-        {s.prompt}
-      </p>
-    </button>
-  ))}
-</div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                  {quickPrompts.map((s, idx) => {
+                  const resolvedPrompt = typeof s.prompt === 'function' ? s.prompt(userProfile) : s.prompt;
+
+                  return (
+                    <button
+                      key={idx}
+                      onClick={async () => {
+                        setQuickPromptLoading(resolvedPrompt);
+                        setUserInput(resolvedPrompt);
+                        
+                        try {
+                          if (s.mood === 'nostalgic') {
+                            await loadNostalgic();
+                          } else {
+                            await handleQuery(resolvedPrompt, s.mood, s.intent);
+                          }
+                        } finally {
+                          setQuickPromptLoading(null);
+                        }
+                      }}
+                      disabled={quickPromptLoading === resolvedPrompt}
+                      className={`bg-gradient-to-r ${s.color} rounded-2xl p-6 text-white hover:scale-105 transition-all duration-200 relative ${
+                        quickPromptLoading === resolvedPrompt ? 'opacity-75' : ''
+                      }`}
+                    >
+                      {quickPromptLoading === resolvedPrompt && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded-2xl">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+                        </div>
+                      )}
+                      <div className={`text-2xl mb-2 ${quickPromptLoading === resolvedPrompt ? 'opacity-50' : ''}`}>
+                        {s.icon}
+                      </div>
+                      <p className={`font-medium ${quickPromptLoading === resolvedPrompt ? 'opacity-50' : ''}`}>
+                        {resolvedPrompt}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
 
               {/* Custom Input */}
               <div className="flex space-x-2">
@@ -1031,87 +1436,127 @@ Instructions:
             </div>
 
             {/* Chat Output with Video */}
-{chatOutput && (
-  <div className="bg-white/10 backdrop-blur-sm rounded-3xl border border-white/20 overflow-hidden relative">
-    {/* Creative Video Placement - Floating circular avatar */}
-    <div className="absolute top-4 right-4 z-20">
-  <div className="relative">
-    {/* Animated border ring */}
-    <div className="absolute inset-0 rounded-full bg-gradient-to-r from-purple-400 via-pink-400 to-blue-400" style={{ padding: '3px' }}>
-      <div className="w-full h-full rounded-full bg-black"></div>
-    </div>
-    
-    {/* Video container - Fixed size */}
-    <div className="relative w-65 h-26 rounded-full overflow-hidden border-2 border-white/20 bg-black">
-          {isStreaming || isVideoPlaying ? (
-  <video
-    ref={videoRef}
-    className="object-contain scale-100 -translate-y-4"
-    muted
-    loop={isStreaming}
-    playsInline
-    onPlay={() => setIsVideoPlaying(true)}
-    onEnded={() => {
-      setIsVideoPlaying(false);
-      if (!isStreaming && videoRef.current) {
-        videoRef.current.pause();
-      }
-    }}
-    onLoadedData={() => {
-      if (videoRef.current && isStreaming) {
-        videoRef.current.currentTime = 0;
-        videoRef.current.play();
-      }
-    }}
-  >
-    <source src={`/qloo_assets/videos/vid${currentVideoIndex + 1}.mp4`} type="video/mp4" />
-  </video>
-) : (
-  <Image
-    src="/qloo_assets/images/image.webp" // <-- provide your fallback image path
-    alt="Video Fallback"
-    width={120}
-    height={120}
-    className="rounded-full object-contain"
-  />
-)}
+            {chatOutput && (
+              <div className="relative w-full h-screen overflow-hidden rounded-3xl">
+                {/* Background Video/Photo Layer */}
+            <div className="absolute inset-0 z-0">
+              <div className="relative w-full h-full">
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="relative w-full h-full max-w-none">
+                    {/* Photo Layer */}
+                    <div className={`absolute inset-0 transition-opacity duration-500 ${
+                      showPhoto ? 'opacity-100' : 'opacity-0'
+                    }`}>
+                      <Image
+                        src="/qloo_assets/images/reading.png"
+                        alt="Assistant Avatar"
+                        fill
+                        className="object-cover"
+                        priority
+                      />
+                    </div>
 
+                    {/* Video Layer */}
+                    <div className={`absolute inset-0 transition-opacity duration-500 ${
+                      showPhoto ? 'opacity-0' : 'opacity-100'
+                    }`}>
+                      <video
+                        ref={videoRef}
+                        className="w-full h-full object-cover scale-100 -translate-x-[-15%]"
+                        muted={false}
+                        autoPlay={false}
+                        loop={false}
+                        playsInline
+                        onLoadedData={handleVideoLoadedData}
+                        onEnded={handleVideoEnded}
+                        onError={handleVideoError}
+                        onPause={() => {
+                          if ((isStreaming || isPlayingAudio) && videoRef.current && !showPhoto) {
+                            setTimeout(() => playVideoSafely(), 100);
+                          }
+                        }}
+                      >
+                        <source src={`/qloo_assets/videos/vid${currentVideoIndex + 1}.mp4`} type="video/mp4" />
+                      </video>
+                    </div>
 
-          
-          {/* Overlay when not playing */}
-          {!isVideoPlaying && (
-            <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-              <div className="w-3 h-3 rounded-full bg-white opacity-60"></div>
+                    {/* Subtle overlay to boost contrast */}
+                    <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-transparent to-black/30 z-10"></div>
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/20 z-10"></div>
+                  </div>
+                </div>
+              </div>
             </div>
-          )}
-        </div>
-    
-    {/* Pulse effect when streaming */}
-    {isStreaming && (
-          <div className="absolute inset-0 rounded-full bg-gradient-to-r from-purple-400/20 to-pink-400/20 animate-ping"></div>
-        )}
-  </div>
-</div>
 
-    {/* Chat content with proper padding to avoid video */}
-    <div className="p-8 pr-44"> {/* Increased right padding */}
-<h3 className="text-xl font-bold text-white mb-4 flex items-center hover:text-purple-400 transition-colors duration-300">
-          Sahayak Suggestions
-        {isStreaming && (
-          <div className="ml-3 flex space-x-1">
-            <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce"></div>
-            <div className="w-2 h-2 bg-pink-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
-            <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+            {/* Chat Panel on Left */}
+            <div className="relative z-10 h-full flex">
+              <div className="w-2/5 max-w-lg h-full flex flex-col">
+                <div className="flex-1 backdrop-blur-xl bg-black/30 border-r border-white/10">
+                  <div className="p-6 border-b border-white/10">
+                    <h2 className="text-2xl font-bold text-white">Sahayak</h2>
+                    <p className="text-white/60 text-sm mt-1">Your personalized cultural assistant</p>
+                    
+                    {/* Audio Status Indicator */}
+                    {isPlayingAudio && (
+                      <div className="flex items-center space-x-2 mt-2">
+                        <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                        <span className="text-green-400 text-xs">Speaking...</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex-1 p-6 overflow-y-auto max-h-[80vh] min-h-0">
+                    <div className="space-y-4">
+                      <div className="flex space-x-3">
+                        <div className="flex-1">
+                          <div className="bg-white/10 rounded-2xl p-4 border border-white/20">
+                            <pre className="text-white whitespace-pre-wrap break-words font-mono leading-relaxed">
+                              {chatOutput}
+                              {isStreaming && <span className="animate-pulse text-purple-400">▋</span>}
+                            </pre>
+                          </div>
+                          <div className="text-xs text-white/40 mt-2 flex items-center space-x-2">
+                            <span>Just now</span>
+                            {isStreaming && (
+                              <>
+                                <span>•</span>
+                                <span className="flex items-center space-x-1">
+                                  <span>Thinking</span>
+                                  <span className="flex space-x-1">
+                                    <div className="w-1 h-1 bg-purple-400 rounded-full animate-bounce"></div>
+                                    <div className="w-1 h-1 bg-pink-400 rounded-full animate-bounce delay-100"></div>
+                                    <div className="w-1 h-1 bg-blue-400 rounded-full animate-bounce delay-200"></div>
+                                  </span>
+                                </span>
+                              </>
+                            )}
+                            {isPlayingAudio && (
+                              <>
+                                <span>•</span>
+                                <span className="flex items-center space-x-1 text-green-400">
+                                  <span>Speaking</span>
+                                  <div className="flex space-x-1">
+                                    <div className="w-1 h-1 bg-green-400 rounded-full animate-bounce"></div>
+                                    <div className="w-1 h-1 bg-green-400 rounded-full animate-bounce delay-75"></div>
+                                    <div className="w-1 h-1 bg-green-400 rounded-full animate-bounce delay-150"></div>
+                                  </div>
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Optional Ambient Glow Effects */}
+            <div className="absolute top-0 left-0 w-96 h-96 bg-purple-500/20 rounded-full blur-3xl animate-pulse" />
+            <div className="absolute bottom-0 right-0 w-96 h-96 bg-pink-500/20 rounded-full blur-3xl animate-pulse delay-1000" />
           </div>
         )}
-      </h3>
-      <div className="text-purple-100 whitespace-pre-line leading-relaxed font-mono max-w-[calc(100%-4rem)]"> {/* Added max-width */}
-        {chatOutput}
-        {isStreaming && <span className="animate-pulse">|</span>}
-      </div>
-    </div>
-  </div>
-)}
 
             {/* Recommendations */}
             {formattedRecommendations.length > 0 ? (
@@ -1132,39 +1577,38 @@ Instructions:
                           }}
                         >
                       {/* Image with Error Handling */}
-{rec.image && !imageErrors.has(rec.entityId) ? (
-  <Image
-    src={rec.image}
-    alt={rec.name}
-    width={400}
-    height={180}
-    className="w-full h-32 object-cover rounded-xl mb-3"
-    unoptimized
-    onError={async () => {
-      // Double-check the URL before marking as error
-      const isValid = await checkImageUrl(rec.image);
-      if (!isValid) {
-        handleImageError(rec.entityId);
-      }
-    }}
-    onLoad={async (e) => {
-      // Check if the loaded image is actually the oops.png
-      const img = e.target as HTMLImageElement;
-      if (img.src.includes('oops.png') || img.naturalWidth === 1 || img.naturalHeight === 1) {
-        handleImageError(rec.entityId);
-      }
-    }}
-  />
-) : (
-  <Image
-    src="/qloo_assets/images/image.webp"
-    alt={rec.name}
-    width={400}
-    height={180}
-    className="w-full h-32 object-cover rounded-xl mb-3"
-  />
-)}
-
+                    {rec.image && !imageErrors.has(rec.entityId) ? (
+                      <Image
+                        src={rec.image}
+                        alt={rec.name}
+                        width={400}
+                        height={180}
+                        className="w-full h-32 object-cover rounded-xl mb-3"
+                        unoptimized
+                        onError={async () => {
+                          // Double-check the URL before marking as error
+                          const isValid = await checkImageUrl(rec.image);
+                          if (!isValid) {
+                            handleImageError(rec.entityId);
+                          }
+                        }}
+                        onLoad={async (e) => {
+                          // Check if the loaded image is actually the oops.png
+                          const img = e.target as HTMLImageElement;
+                          if (img.src.includes('oops.png') || img.naturalWidth === 1 || img.naturalHeight === 1) {
+                            handleImageError(rec.entityId);
+                          }
+                        }}
+                      />
+                    ) : (
+                      <Image
+                        src="/qloo_assets/images/image.webp"
+                        alt={rec.name}
+                        width={400}
+                        height={180}
+                        className="w-full h-32 object-cover rounded-xl mb-3"
+                      />
+                    )}
 
                       {/* 2) Title + Type */}
                       <h4 className="text-lg font-semibold">{rec.name}</h4>
@@ -1184,83 +1628,83 @@ Instructions:
 
                       {/* 6) Learn More */}
                       <button
-          onClick={() => handleLearnMore(rec.entityId)}
-          className="mt-auto bg-gradient-to-r from-green-400 to-blue-500 py-2 rounded-xl text-sm hover:scale-105 transition-transform"
-        >
-          Learn More
-        </button>
+                        onClick={() => handleLearnMore(rec.entityId)}
+                        className="mt-auto bg-gradient-to-r from-green-400 to-blue-500 py-2 rounded-xl text-sm hover:scale-105 transition-transform"
+                      >
+                        Learn More
+                      </button>
 
                       {/* 7) Like Button */}
                       <button
-          className={`absolute top-3 right-3 p-1 rounded-full transition-all duration-300 transform ${
-            likedPlaces.has(rec.entityId) 
-              ? 'bg-red-500 scale-110' 
-              : 'bg-white/20 hover:bg-white/30'
-          } ${
-            heartAnimation === rec.entityId 
-              ? 'animate-pulse scale-125' 
-              : ''
-          }`}
-          onClick={() => handleHeartClick(rec.entityId)}
-        >
-          <Heart 
-            className={`w-5 h-5 transition-all duration-300 ${
-              likedPlaces.has(rec.entityId) 
-                ? 'text-white fill-current' 
-                : 'text-white'
-            } ${
-              heartAnimation === rec.entityId 
-                ? 'animate-bounce' 
-                : ''
-            }`} 
-          />
-        </button>
-      </div>
-    ) : null
-  ))}
-  {showEntityModal && entityDetails && (
-  <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 overflow-y-auto">
-  <div className="flex justify-center min-h-screen p-6 pt-120">
-    <div className="bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 max-w-4xl w-full">
-      <div className="p-6">
-        {/* Header */}
-        <div className="flex justify-between items-start mb-6">
-          <div>
-            <h2 className="text-2xl font-bold text-white mb-2">{entityDetails.name}</h2>
-          </div>
-          <button
-            onClick={() => setShowEntityModal(false)}
-            className="text-white hover:text-red-400 transition-colors"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
+                      className={`absolute top-3 right-3 p-1 rounded-full transition-all duration-300 transform ${
+                        likedPlaces.has(rec.entityId) 
+                          ? 'bg-red-500 scale-110' 
+                          : 'bg-white/20 hover:bg-white/30'
+                      } ${
+                        heartAnimation === rec.entityId 
+                          ? 'animate-pulse scale-125' 
+                          : ''
+                      }`}
+                      onClick={() => handleHeartClick(rec.entityId)}
+                    >
+                      <Heart 
+                        className={`w-5 h-5 transition-all duration-300 ${
+                          likedPlaces.has(rec.entityId) 
+                            ? 'text-white fill-current' 
+                            : 'text-white'
+                        } ${
+                          heartAnimation === rec.entityId 
+                            ? 'animate-bounce' 
+                            : ''
+                        }`} 
+                      />
+                    </button>
+                  </div>
+                ) : null
+              ))}
+              {showEntityModal && entityDetails && (
+              <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 overflow-y-auto">
+              <div className="flex justify-center min-h-screen p-6 pt-120">
+                <div className="bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 max-w-4xl w-full">
+                  <div className="p-6">
+                    {/* Header */}
+                    <div className="flex justify-between items-start mb-6">
+                      <div>
+                        <h2 className="text-2xl font-bold text-white mb-2">{entityDetails.name}</h2>
+                      </div>
+                      <button
+                        onClick={() => setShowEntityModal(false)}
+                        className="text-white hover:text-red-400 transition-colors"
+                      >
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
 
         {/* Image with Error Handling */}
-{entityDetails.image && !imageErrors.has(entityDetails.entityId) ? (
-  <div className="relative w-full mb-6 aspect-video rounded-2xl overflow-hidden bg-black">
-  <Image
-    src={entityDetails.image}
-    alt={entityDetails.name}
-    fill
-    className="object-contain"
-    unoptimized
-    onError={() => handleImageError(entityDetails.entityId)}
-  />
-</div>
-) : (
-  <div className="mb-6">
-    <Image
-      src="/qloo_assets/images/image_expanded.jpg"
-      alt={entityDetails.name}
-      width={600}
-      height={300}
-      className="w-full h-64 object-cover rounded-2xl"
-    />
-  </div>
-)}
+        {entityDetails.image && !imageErrors.has(entityDetails.entityId) ? (
+          <div className="relative w-full mb-6 aspect-video rounded-2xl overflow-hidden bg-black">
+          <Image
+            src={entityDetails.image}
+            alt={entityDetails.name}
+            fill
+            className="object-contain"
+            unoptimized
+            onError={() => handleImageError(entityDetails.entityId)}
+          />
+        </div>
+        ) : (
+          <div className="mb-6">
+            <Image
+              src="/qloo_assets/images/image_expanded.jpg"
+              alt={entityDetails.name}
+              width={600}
+              height={300}
+              className="w-full h-64 object-cover rounded-2xl"
+            />
+          </div>
+        )}
 
         {/* Enhanced Details Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -1372,31 +1816,31 @@ Instructions:
           </button>
           
           <button
-  onClick={() => {
-    if (entityDetails.properties?.website) {
-      window.open(entityDetails.properties.website, '_blank');
-    }
-    console.log('Viewed entity details:', entityDetails.entityId);
-    setShowEntityModal(false);
-  }}
-  disabled={!entityDetails.properties?.website}
-  className={`flex-1 py-3 rounded-2xl font-semibold transition-all ${
-    entityDetails.properties?.website
-      ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:scale-105'
-      : 'bg-gray-500 text-gray-300 cursor-not-allowed'
-  }`}
->
-  Visit Now
-</button>
+            onClick={() => {
+              if (entityDetails.properties?.website) {
+                window.open(entityDetails.properties.website, '_blank');
+              }
+              console.log('Viewed entity details:', entityDetails.entityId);
+              setShowEntityModal(false);
+            }}
+            disabled={!entityDetails.properties?.website}
+            className={`flex-1 py-3 rounded-2xl font-semibold transition-all ${
+              entityDetails.properties?.website
+                ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:scale-105'
+                : 'bg-gray-500 text-gray-300 cursor-not-allowed'
+            }`}
+          >
+            Visit Now
+          </button>
 
-        </div>
-      </div>
-    </div>
-  </div>
-  </div>
-)}
-</div>
+                  </div>
+                </div>
               </div>
+            </div>
+            </div>
+          )}
+          </div>
+          </div>
             ) 
             : (
               <p className="text-purple-200"></p>
@@ -1469,56 +1913,55 @@ Instructions:
         {activeTab === 'rewards' && (
           <div className="space-y-6">
             {/* Spin Wheel + Floating Image Section */}
-<div className="relative">
-  {/* Floating Character Image (bottom-right) */}
-  <img
-    src="/qloo_assets/images/prize.png"
-    alt="Prize character"
-    className="hidden lg:block absolute bottom-0 right-0 w-80 object-contain z-10 pointer-events-none"
-  />
+            <div className="relative">
+              {/* Floating Character Image (bottom-right) */}
+              <img
+                src="/qloo_assets/images/prize.png"
+                alt="Prize character"
+                className="hidden lg:block absolute bottom-0 right-0 w-80 object-contain z-10 pointer-events-none"
+              />
 
-  {/* Spin Wheel Section */}
-  <div className="bg-white/10 backdrop-blur-sm rounded-3xl p-8 border border-white/20 text-center relative z-0">
-    <h3 className="text-2xl font-bold text-white mb-4">🎰 Spin the Cultural Wheel!</h3>
-    <p className="text-purple-200 mb-6">Use 100 points for a chance to win amazing rewards</p>
+              {/* Spin Wheel Section */}
+              <div className="bg-white/10 backdrop-blur-sm rounded-3xl p-8 border border-white/20 text-center relative z-0">
+                <h3 className="text-2xl font-bold text-white mb-4">🎰 Spin the Cultural Wheel!</h3>
+                <p className="text-purple-200 mb-6">Use 100 points for a chance to win amazing rewards</p>
 
-    <div className="relative mx-auto mb-6" style={{ width: '200px', height: '200px' }}>
-      <div className={`w-full h-full rounded-full bg-gradient-to-r from-yellow-400 via-pink-500 to-purple-500 ${isSpinning ? 'animate-spin' : ''}`}>
-        <div className="absolute inset-4 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center">
-          <div className="text-4xl">
-            {isSpinning ? '🌀' : '🎁'}
-          </div>
-        </div>
-      </div>
-      <div className="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-2">
-        <div className="w-0 h-0 border-l-4 border-r-4 border-b-8 border-l-transparent border-r-transparent border-b-white"></div>
-      </div>
-    </div>
+                <div className="relative mx-auto mb-6" style={{ width: '200px', height: '200px' }}>
+                  <div className={`w-full h-full rounded-full bg-gradient-to-r from-yellow-400 via-pink-500 to-purple-500 ${isSpinning ? 'animate-spin' : ''}`}>
+                    <div className="absolute inset-4 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center">
+                      <div className="text-4xl">
+                        {isSpinning ? '🌀' : '🎁'}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-2">
+                    <div className="w-0 h-0 border-l-4 border-r-4 border-b-8 border-l-transparent border-r-transparent border-b-white"></div>
+                  </div>
+                </div>
 
-    <button
-      onClick={() => {
-        setShowSpinWheel(true);
-        handleSpin();
-      }}
-      disabled={mockUser.points < 100 || isSpinning}
-      className={`px-8 py-4 rounded-2xl font-bold text-lg transition-all duration-200 ${
-        mockUser.points >= 100 && !isSpinning
-          ? 'bg-gradient-to-r from-yellow-400 to-orange-500 text-black hover:scale-105'
-          : 'bg-gray-500 text-gray-300 cursor-not-allowed'
-      }`}
-    >
-      {isSpinning ? 'Spinning...' : `Spin (100 points)`}
-    </button>
+                <button
+                  onClick={() => {
+                    setShowSpinWheel(true);
+                    handleSpin();
+                  }}
+                  disabled={mockUser.points < 100 || isSpinning}
+                  className={`px-8 py-4 rounded-2xl font-bold text-lg transition-all duration-200 ${
+                    mockUser.points >= 100 && !isSpinning
+                      ? 'bg-gradient-to-r from-yellow-400 to-orange-500 text-black hover:scale-105'
+                      : 'bg-gray-500 text-gray-300 cursor-not-allowed'
+                  }`}
+                >
+                  {isSpinning ? 'Spinning...' : `Spin (100 points)`}
+                </button>
 
-    {spinResult && (
-      <div className="mt-6 bg-gradient-to-r from-green-500 to-teal-500 rounded-2xl p-4">
-        <h4 className="text-white font-bold text-lg mb-2">🎉 Congratulations!</h4>
-        <p className="text-white">{spinResult.description}</p>
-      </div>
-    )}
-  </div>
-</div>
-
+                {spinResult && (
+                  <div className="mt-6 bg-gradient-to-r from-green-500 to-teal-500 rounded-2xl p-4">
+                    <h4 className="text-white font-bold text-lg mb-2">🎉 Congratulations!</h4>
+                    <p className="text-white">{spinResult.description}</p>
+                  </div>
+                )}
+              </div>
+            </div>
 
             {/* Available Rewards */}
             <div className="bg-white/10 backdrop-blur-sm rounded-3xl p-6 border border-white/20">
@@ -1538,37 +1981,37 @@ Instructions:
                     <div className="flex justify-between items-center">
                       <span className="text-yellow-400 font-semibold">{reward.cost} pts</span>
                       <button
-  disabled={userPoints < reward.cost || redeemAnimations[reward.name]}
-  onClick={() => {
-    if (userPoints >= reward.cost) {
-      setRedeemAnimations(prev => ({ ...prev, [reward.name]: true }));
-      setUserPoints(prev => prev - reward.cost);
-      
-      setTimeout(() => {
-        setRedeemAnimations(prev => ({ ...prev, [reward.name]: false }));
-      }, 1500); // Longer animation
-    }
-  }}
-  className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-500 ease-in-out transform ${
-    userPoints >= reward.cost
-      ? redeemAnimations[reward.name]
-        ? 'bg-gradient-to-r from-green-400 to-teal-500 text-white scale-110 shadow-lg animate-bounce' 
-        : 'bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:scale-105 hover:shadow-md'
-      : 'bg-gray-500 text-gray-300 cursor-not-allowed opacity-50'
-  }`}
->
-  <span className={`flex items-center justify-center ${redeemAnimations[reward.name] ? 'animate-pulse' : ''}`}>
-    {redeemAnimations[reward.name] ? (
-      <>
-        <span className="mr-1">✨</span>
-        Redeemed!
-        <span className="ml-1">✨</span>
-      </>
-    ) : (
-      'Redeem'
-    )}
-  </span>
-</button>
+                        disabled={userPoints < reward.cost || redeemAnimations[reward.name]}
+                        onClick={() => {
+                          if (userPoints >= reward.cost) {
+                            setRedeemAnimations(prev => ({ ...prev, [reward.name]: true }));
+                            setUserPoints(prev => prev - reward.cost);
+                            
+                            setTimeout(() => {
+                              setRedeemAnimations(prev => ({ ...prev, [reward.name]: false }));
+                            }, 1000); // Longer animation
+                          }
+                        }}
+                        className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-500 ease-in-out transform ${
+                          userPoints >= reward.cost
+                            ? redeemAnimations[reward.name]
+                              ? 'bg-gradient-to-r from-green-400 to-teal-500 text-white scale-110 shadow-lg animate-bounce' 
+                              : 'bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:scale-105 hover:shadow-md'
+                            : 'bg-gray-500 text-gray-300 cursor-not-allowed opacity-50'
+                        }`}
+                      >
+                        <span className={`flex items-center justify-center ${redeemAnimations[reward.name] ? 'animate-pulse' : ''}`}>
+                          {redeemAnimations[reward.name] ? (
+                            <>
+                              <span className="mr-1">✨</span>
+                              Redeemed!
+                              <span className="ml-1">✨</span>
+                            </>
+                          ) : (
+                            'Redeem'
+                          )}
+                        </span>
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -1579,32 +2022,32 @@ Instructions:
             <div className="bg-white/10 backdrop-blur-sm rounded-3xl p-6 border border-white/20">
               <h3 className="text-xl font-bold text-white mb-6">🏆 Cultural Explorers Leaderboard</h3>
               <div className="space-y-3">
-  {[
-    { rank: 1, name: 'Arjun Patel', points: 12500, badge: '🥇' },
-    { rank: 2, name: 'Maya Singh', points: 9800, badge: '🥈' },
-    { rank: 3, name: 'Priya Sharma', points: userPoints, badge: '🥉', isCurrentUser: true },
-    { rank: 4, name: 'Ravi Kumar', points: 5200, badge: '4️⃣' },
-    { rank: 5, name: 'Anya Gupta', points: 4900, badge: '5️⃣' }
-  ].sort((a, b) => b.points - a.points).map((user, idx) => (
-    <div key={idx} className={`flex items-center justify-between p-4 rounded-2xl transition-colors ${
-      user.isCurrentUser ? 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-400/30' : 'bg-white/5'
-    }`}>
-      <div className="flex items-center space-x-4">
-        <span className="text-2xl">{user.badge}</span>
-        <div>
-          <p className={`font-semibold ${user.isCurrentUser ? 'text-yellow-300' : 'text-white'}`}>
-            {user.name} {user.isCurrentUser && '(You)'}
-          </p>
-          <p className="text-purple-200 text-sm">Cultural Explorer</p>
-        </div>
-      </div>
-      <div className="text-right">
-        <p className="font-bold text-white">{user.points.toLocaleString()}</p>
-        <p className="text-purple-200 text-sm">points</p>
-      </div>
-    </div>
-  ))}
-</div>
+                {[
+                  { rank: 1, name: 'Arjun Patel', points: 12500, badge: '🥇' },
+                  { rank: 2, name: 'Maya Singh', points: 9800, badge: '🥈' },
+                  { rank: 3, name: 'Priya Sharma', points: userPoints, badge: '🥉', isCurrentUser: true },
+                  { rank: 4, name: 'Ravi Kumar', points: 5200, badge: '4️⃣' },
+                  { rank: 5, name: 'Anya Gupta', points: 4900, badge: '5️⃣' }
+                ].sort((a, b) => b.points - a.points).map((user, idx) => (
+                  <div key={idx} className={`flex items-center justify-between p-4 rounded-2xl transition-colors ${
+                    user.isCurrentUser ? 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-400/30' : 'bg-white/5'
+                  }`}>
+                    <div className="flex items-center space-x-4">
+                      <span className="text-2xl">{user.badge}</span>
+                      <div>
+                        <p className={`font-semibold ${user.isCurrentUser ? 'text-yellow-300' : 'text-white'}`}>
+                          {user.name} {user.isCurrentUser && '(You)'}
+                        </p>
+                        <p className="text-purple-200 text-sm">Cultural Explorer</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-bold text-white">{user.points.toLocaleString()}</p>
+                      <p className="text-purple-200 text-sm">points</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}

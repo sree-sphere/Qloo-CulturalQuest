@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@devma/qloo": "^1.0.1",
+    "@elevenlabs/elevenlabs-js": "^2.7.0",
     "@vowpalwabbit/vowpalwabbit": "^0.0.8",
     "ai": "^4.3.19",
     "cors": "^2.8.5",

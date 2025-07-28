@@ -1,41 +1,64 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# dependencies
-/node_modules
-/.pnp
+# === General OS files ===
+.DS_Store
+Thumbs.db
+
+# === Node.js dependencies ===
+node_modules/
+
+# === Yarn / PNP ===
 .pnp.*
+.pnp/
 .yarn/*
 !.yarn/patches
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
 
-# testing
-/coverage
+# === Next.js ===
+.next/
+out/
+build/
 
-# next.js
-/.next/
-/out/
+# === Vercel deployment ===
+.vercel
 
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-
-# debug
+# === Logs ===
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.pnpm-debug.log*
+pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# === Environment variables ===
 .env*
 
-# vercel
-.vercel
-
-# typescript
+# === TypeScript ===
 *.tsbuildinfo
 next-env.d.ts
+
+# === Coverage ===
+coverage/
+
+# === Python related ===
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+.Python
+build/
+dist/
+venv/
+.venv/
+
+# === Jupyter Notebooks ===
+*.ipynb
+.ipynb_checkpoints/
+
+# === Project-specific generated or non-source files ===
+api_response.txt
+demp.ipynb
+results_diversified.json
+diversified_results.json

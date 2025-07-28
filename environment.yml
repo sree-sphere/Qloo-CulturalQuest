@@ -1,0 +1,9 @@
+name: qloo-ts
+channels:
+  - defaults
+  - https://repo.anaconda.com/pkgs/main
+  - https://repo.anaconda.com/pkgs/r
+dependencies:
+  - nodejs
+  - python
+prefix: /opt/anaconda3/envs/qloo-ts

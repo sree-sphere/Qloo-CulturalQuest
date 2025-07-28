@@ -1,36 +1,113 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# CulturalQuest 🌍
 
-## Getting Started
+A gamified cultural exploration platform that helps new migrants and cultural enthusiasts discover authentic local experiences through AI-powered recommendations, interactive chat, and immersive rewards system.
 
-First, run the development server:
+Leveraging Qloo’s Cultural Gamification SDK, LLM for conversational guidance, and ElevenLabs Text‑to‑Speech for audio narration, CulturalQuest blends advanced recommendation‑system techniques (semantic embeddings, MMR, affinity‑diversity trade‑off) with an engaging, points‑n‑badges UX.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+---
+
+## ✨ Features
+
+- **Contextual Recommendations**  
+  - Uses a **semantic similarity** pipeline via SentenceTransformer embeddings (`all-MiniLM-L6-v2`) + **cosine similarity**  
+  - Applies **Maximal Marginal Relevance (MMR)** two‑phase selection to balance **relevance** (λ≈0.7) and **novelty/diversity** (λ≈0.3)  
+  - Supports high‑affinity “top‑k” picks and diversified fill‑ins for rich discovery  
+
+- **Cultural Gamification**  
+  - Points, levels, badges (like “Festival of Lights Explorer”) via `qloo_gamification_sdk.ts`  
+  - User affinity vector updates on interactions (likes/unlikes) with learning‑rate adjustments  
+
+- **AI Chat Assistant**  
+  - `chat/route.ts` proxy to OpenAI ChatGPT, enriched with:  
+    - Full API context (entities’ descriptions, hours, amenities)  
+    - User profile metadata (demographics, preferences, streaks)  
+  - Streaming responses with live video/photo backgrounds  
+
+- **Text‑to‑Speech Playback**  
+  - `/api/tts` (`tts/route.ts`) calls ElevenLabs to generate audio blobs  
+  - Synchronized video overlays and fallback to static imagery  
+
+- **Nostalgic & Adventure Modes**  
+  - “Nostalgic” mode caches & reorders recommendations by user‑liked similarity scores  
+  - “Social” mode filters weekend‑open vegetarian venues and uses chat for itinerary  
+
+---
+
+## Tech Stack
+
+- **Frontend**: Next.js + TypeScript + React + Tailwind CSS  
+- **Backend**: Next.js API routes (`route.ts`)  
+  - `chat/route.ts` → OpenAI Chat API  
+  - `tts/route.ts`  → ElevenLabs TTS API  
+- **Python ML Engine** (`smart_diversification.py`):  
+  - `sentence-transformers`  
+  - `scikit‑learn` (cosine_similarity)  
+  - NumPy for diversity metrics  
+- **SDKs**:  
+  - `@devma/qloo` + `QlooCulturalGamification`  
+- **Environment**:  
+  - Conda (`qloo-ts`) for Python  
+  - Node.js (≥14) for Next.js  
+
+---
+
+## Folder Tree
+
+```
+.
+├── public/
+│   ├── qloo_assets/…                       # Avatar Images and Assistant video responses
+│   └── …  
+├── src/
+│   ├── app/
+│   │   └── api/
+│   │       ├── chat/route.ts               # ChatGPT API streaming proxy
+│   │       └── tts/route.ts                # ElevenLabs TTS proxy
+│   ├── components/
+│   │   └── cultural_gamification_ui.tsx    # React Gamification UI component (main)
+│   └── lib/
+│       └── qloo_gamification_sdk.ts        # Qloo SDK wrapper
+├── smart_diversification.py                # Offline diversification script
+├── requirements.txt
+├── package.json                            # Node.js deps & scripts
+├── tsconfig.json
+└── README.md
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Setup
+### Prerequisites
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- Node.js 18+
+- npm or yarn
 
-## Learn More
+### API Keys for:
 
-To learn more about Next.js, take a look at the following resources:
+- Qloo API
+- OpenAI GPT
+- ElevenLabs
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Environment Variables
+Create a .env.local file:
+```
+NEXT_PUBLIC_QLOO_API_KEY=
+OPENAI_API_KEY=
+ELEVENLABS_API_KEY=
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Install
+Conda Environment (Python)
+```
+conda create -n qloo-ts python=3.10
+conda activate qloo-ts
+pip install -r requirements.txt
+```
 
-## Deploy on Vercel
+Node.js Setup (Next.js + TypeScript): default on http://localhost:3000
+```
+npm install
+npm run dev
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---

@@ -48,3 +48,36 @@ html, body {
 .animate-card-reorder {
   animation: cardReorder 0.5s ease-in-out;
 }
+
+@keyframes modal-in {
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.animate-modal-in {
+  animation: modal-in 200ms ease-out forwards;
+}
+
+@keyframes fade-slide {
+  0% {
+    opacity: 0;
+    transform: translateY(10%);
+  }
+  10% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  90% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-10%);
+  }
+}
+
+.animate-fade-slide {
+  animation: fade-slide 4s ease-in-out infinite;
+}
