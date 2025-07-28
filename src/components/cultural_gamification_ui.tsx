@@ -123,26 +123,28 @@ const calculateSimilarityScore = (entity1: any, entity2: any): number => {
 const diversifyRecommendations = (recommendations, userAffinityVector, lambda = 0.7) => {
   if (recommendations.length <= 3) return recommendations;
   
+  // Enhanced diversification with semantic similarity
   const selected = [];
   const remaining = [...recommendations];
   
-  // Always include top recommendation
+  // Step 1: Always include top recommendation (highest affinity)
   selected.push(remaining.shift());
   
-  while (selected.length < Math.min(8, recommendations.length) && remaining.length > 0) {
+  // Step 2: Smart MMR-based selection
+  while (selected.length < Math.min(15, recommendations.length) && remaining.length > 0) {
     let bestScore = -1;
     let bestIndex = 0;
     
     remaining.forEach((candidate, index) => {
-      // Relevance score based on user affinity
-      const relevanceScore = calculateAffinityScore(candidate, userAffinityVector);
+      // Enhanced relevance score
+      const relevanceScore = calculateSemanticAffinity(candidate, userAffinityVector);
       
-      // Diversity score (minimum similarity to already selected)
+      // Semantic diversity score using content features
       const diversityScore = selected.length > 0 
-        ? Math.min(...selected.map(sel => calculateSimilarityScore(candidate, sel)))
+        ? Math.min(...selected.map(sel => calculateSemanticSimilarity(candidate, sel)))
         : 100;
       
-      // MMR formula: λ * relevance - (1-λ) * max_similarity
+      // MMR formula with enhanced features
       const mmrScore = lambda * relevanceScore - (1 - lambda) * (100 - diversityScore);
       
       if (mmrScore > bestScore) {
@@ -157,61 +159,95 @@ const diversifyRecommendations = (recommendations, userAffinityVector, lambda = 
   return selected;
 };
 
-const calculateAffinityScore = (entity, affinityVector) => {
+// Enhanced semantic similarity calculation
+const calculateSemanticSimilarity = (entity1: any, entity2: any): number => {
+  let score = 0;
+  
+  // Cuisine/category similarity
+  const getCuisineFeatures = (entity) => {
+    const type = entity.type?.toLowerCase() || '';
+    const description = entity.description?.toLowerCase() || '';
+    return { type, description };
+  };
+  
+  const features1 = getCuisineFeatures(entity1);
+  const features2 = getCuisineFeatures(entity2);
+  
+  // Exact type match
+  if (features1.type === features2.type) {
+    score += 50;
+  }
+  
+  // Description semantic overlap
+  const words1 = features1.description.split(/\s+/).filter(w => w.length > 3);
+  const words2 = features2.description.split(/\s+/).filter(w => w.length > 3);
+  const commonWords = words1.filter(word => words2.includes(word));
+  score += commonWords.length * 15;
+  
+  // Price range similarity
+  const price1 = entity1.priceRange || 'medium';
+  const price2 = entity2.priceRange || 'medium';
+  if (price1 === price2) score += 20;
+  
+  return Math.min(score, 100);
+};
+
+// Enhanced affinity calculation
+const calculateSemanticAffinity = (entity, affinityVector) => {
   let score = 50; // base score
   
-  // Check affinity for entity features
-  const cuisine = entity.type.toLowerCase();
-  score += (affinityVector[`cuisine_${cuisine}`] || 0) * 20;
+  // Multi-dimensional affinity
+  const features = extractEntityFeatures(entity);
   
-  const rating = parseFloat(entity.ratingStars.length);
-  score += (affinityVector.rating || 0) * rating * 5;
+  Object.entries(features).forEach(([key, value]) => {
+    const affinityKey = `${key}_${value}`;
+    const affinityScore = affinityVector[affinityKey] || 0;
+    score += affinityScore * 25; // Increased weight for learned preferences
+  });
   
+  // Boost for high ratings
+  const rating = parseFloat(entity.ratingStars?.length || '0');
+  score += rating * 8;
+  
+  // Distance penalty (if available)
   const distance = parseFloat(entity.distance) || 5;
-  score -= (affinityVector.distance || 0) * distance * 2;
+  score -= Math.max(0, (distance - 2) * 3); // Penalty after 2 miles
   
   return Math.max(0, Math.min(100, score));
 };
 
-const reorderNostalgicRecommendations = (recommendations: any[], likedIds: Set<string>) => {
-  const likedEntities = recommendations.filter(r => likedIds.has(r.entityId));
-  
-  if (likedEntities.length === 0) {
-    // // No likes, return shuffled
-    // return recommendations.sort(() => Math.random() - 0.5);
-    // Use diversification for cold start
-    return diversifyRecommendations(recommendations, userAffinityVector);
-  }
-  
-  // Calculate similarity scores for all entities
-  const scored = 
-  recommendations.map(entity => {
-    let score = 0;
-    
-    if (likedIds.has(entity.entityId)) {
-      score += 1000; // Liked entities get highest priority
-    } else {
-      // Calculate maximum similarity to any liked entity
-      const maxSimilarity = Math.max(
-        ...likedEntities.map(liked => calculateSimilarityScore(entity, liked))
-      );
-      score += maxSimilarity;
-    }
-    
-    // Add small random factor to break ties
-    score += Math.random() * 5;
-    
-    return { ...entity, _score: score };
-  }
-);
-
-  // Sort by score descending
-  return scored
-    .sort((a, b) => b._score - a._score)
-    .map(({ _score, ...rest }) => rest);
+// Extract comprehensive entity features
+const extractEntityFeatures = (entity) => {
+  return {
+    cuisine: entity.type?.toLowerCase().replace(/\s+/g, '_') || 'unknown',
+    price: entity.priceRange || 'medium',
+    rating_tier: entity.ratingStars?.length >= 4 ? 'high' : 'medium',
+    distance_tier: parseFloat(entity.distance || '5') <= 2 ? 'nearby' : 'distant'
+  };
 };
 
-const CACHE_KEY = 'nostalgic-recs';
+const reorderNostalgicRecommendations = (
+  recommendations: any[],
+  likedIds: Set<string>,
+  userAffinityVector: Record<string, number>
+) => {
+  const likedEntities = recommendations.filter(r => likedIds.has(r.entityId));
+  const others = recommendations.filter(r => !likedIds.has(r.entityId));
+
+  // Sort non-liked by similarity
+  const scored = others.map(entity => {
+    const maxSimilarity = likedEntities.length > 0
+      ? Math.max(...likedEntities.map(liked => calculateSimilarityScore(entity, liked)))
+      : 0;
+
+    return { ...entity, _score: maxSimilarity + Math.random() * 5 };
+  }).sort((a, b) => b._score - a._score);
+
+  // Combine liked + top N others, capped at 15
+  const combined = [...likedEntities, ...scored].slice(0, 15);
+
+  return combined.map(({ _score, ...rest }) => rest);
+};
 
 const checkImageUrl = async (url: string): Promise<boolean> => {
   try {
@@ -258,9 +294,10 @@ const CulturalGamificationApp = () => {
       const cached = JSON.parse(cachedNostalgic);
       if (cached.length && cached[0]?.entityId) {
         // Reorder based on current likes
-        const reordered = reorderNostalgicRecommendations(cached, new Set(storedLikes));
+        const reordered = reorderNostalgicRecommendations(cached, new Set(storedLikes), userAffinityVector);
         // Update cache with new order
         localStorage.setItem(CACHE_KEY, JSON.stringify(reordered));
+        console.log('Reordered recommendations:', reordered);
       }
     } catch (error) {
       console.error('Error loading cached nostalgic recommendations:', error);
@@ -296,9 +333,13 @@ const CulturalGamificationApp = () => {
 
   const [redeemAnimations, setRedeemAnimations] = useState<{[key: string]: boolean}>({});
   const [quickPromptLoading, setQuickPromptLoading] = useState<string | null>(null);
-  const [userAffinityVector, setUserAffinityVector] = useState(() => {
-  return JSON.parse(localStorage.getItem('user-affinity') || '{}');
-});
+  const [userAffinityVector, setUserAffinityVector] = useState<Record<string, number>>({});
+
+useEffect(() => {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('user-affinity', JSON.stringify(userAffinityVector));
+  }
+}, [userAffinityVector]);
 
   const [userPoints, setUserPoints] = useState(mockUser.points);
   const [userLevel, setUserLevel] = useState(mockUser.level);
@@ -374,7 +415,7 @@ const updateUserAffinity = (entityId, interaction) => {
     
     // Trigger reordering animation for nostalgic recommendations
     const cachedNostalgic = localStorage.getItem(CACHE_KEY);
-    if (cachedNostalgic && formattedRecommendations.length > 0) {
+    if (cachedNostalgic) {
       try {
         const cached = JSON.parse(cachedNostalgic);
         if (cached.length && cached[0]?.entityId) {
@@ -382,7 +423,7 @@ const updateUserAffinity = (entityId, interaction) => {
           
           // Delay reordering for smooth animation
           setTimeout(() => {
-            const reordered = reorderNostalgicRecommendations(cached, next);
+            const reordered = reorderNostalgicRecommendations(cached, next, userAffinityVector);
             setRecommendations(reordered);
             localStorage.setItem(CACHE_KEY, JSON.stringify(reordered));
             
@@ -555,9 +596,9 @@ const updateUserAffinity = (entityId, interaction) => {
   });
 
   // 2. Use the helper function to reorder
-  const reordered = reorderNostalgicRecommendations(formatted, likedIds);
+  const reordered = reorderNostalgicRecommendations(formatted, likedIds, userAffinityVector);
   
-  localStorage.setItem(CACHE_KEY, JSON.stringify(reordered));
+  localStorage.setItem(CACHE_KEY, JSON.stringify(formatted));
   setRecommendations(reordered);
   return;
 }
@@ -656,7 +697,7 @@ const updateUserAffinity = (entityId, interaction) => {
     const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || '[]');
     if (cached.length && cached[0]?.entityId) {
       const currentLikes = new Set(JSON.parse(localStorage.getItem('liked-entities') || '[]'));
-      const reordered = reorderNostalgicRecommendations(cached, currentLikes);
+      const reordered = reorderNostalgicRecommendations(cached, currentLikes, userAffinityVector);
       setRecommendations(reordered);
       // Update cache with new order
       localStorage.setItem(CACHE_KEY, JSON.stringify(reordered));
@@ -825,7 +866,7 @@ Instructions:
   return (currentLevelProgress / 1000) * 100;
   };
 
-  return (    
+  return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-indigo-900 to-pink-900">
       {/* Header */}
       <div className="bg-black/20 backdrop-blur-sm border-b border-white/10 sticky top-0 z-50">
