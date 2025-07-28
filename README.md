@@ -2,7 +2,26 @@
 
 A gamified cultural exploration platform that helps new migrants and cultural enthusiasts discover authentic local experiences through AI-powered recommendations, interactive chat, and immersive rewards system.
 
-Leveraging Qloo’s Cultural Gamification SDK, LLM for conversational guidance, and ElevenLabs Text‑to‑Speech for audio narration, CulturalQuest blends advanced recommendation‑system techniques (semantic embeddings, MMR, affinity‑diversity trade‑off) with an engaging, points‑n‑badges UX.
+CulturalQuest blends Qloo’s Taste AI™ with OpenAI’s ChatGPT and ElevenLabs TTS to redefine personalized discovery. CulturalQuest uses advanced recommendation‑system techniques (semantic embeddings, MMR, affinity‑diversity trade‑off) with an engaging, points‑n‑badges UX.
+
+---
+
+## 🎯 Why CulturalQuest?
+
+### Inspiration
+
+As a migrant child in Austin, TX in late 2000s, I relied on a site called **[Sulekha](https://us.sulekha.com/)**—a one-stop guide to local stores, eateries, rentals, contact details, festivals (melas), and cultural spots—for navigating life as a migrant. It helped thousands of newcomers build familiarity in a new city through culturally relevant information.
+
+Today, Austin is home to **≈296,000 foreign-born residents** (14% of the city's total population, by [Vera Institute](https://vera-institute.files.svdcdn.com/production/downloads/publications/profile-foreign-born-population-austin.pdf)).
+
+**CulturalQuest** evolves that vision with Qloo’s Taste AI™ and LLMs to deliver real-time, privacy-first recommendations that resonate with users’ heritage and evolving tastes.
+
+### Character Assets
+
+- The **Sahayak** (meaning “helper”) assistant character draws inspiration from the anime/J‑drama **_Trillion Game_**, where the AI named “Turinin” guides customers toward their best-fit choices through intuitive intelligence and contextual suggestions.
+- **Images:** generated using my profile image as reference, with FLUX.1‑Kontext‑Dev space on Hugging Face:  
+  https://huggingface.co/spaces/black-forest-labs/FLUX.1-Kontext-Dev  
+- **Videos:** rendered via ChatGPT’s video API.
 
 ---
 
@@ -18,7 +37,7 @@ Leveraging Qloo’s Cultural Gamification SDK, LLM for conversational guidance, 
   - User affinity vector updates on interactions (likes/unlikes) with learning‑rate adjustments  
 
 - **AI Chat Assistant**  
-  - `chat/route.ts` proxy to OpenAI ChatGPT, enriched with:  
+  - `chat/route.ts` proxy to ChatGPT, enriched with:  
     - Full API context (entities’ descriptions, hours, amenities)  
     - User profile metadata (demographics, preferences, streaks)  
   - Streaming responses with live video/photo backgrounds  
@@ -27,9 +46,10 @@ Leveraging Qloo’s Cultural Gamification SDK, LLM for conversational guidance, 
   - `/api/tts` (`tts/route.ts`) calls ElevenLabs to generate audio blobs  
   - Synchronized video overlays and fallback to static imagery  
 
-- **Nostalgic & Adventure Modes**  
-  - “Nostalgic” mode caches & reorders recommendations by user‑liked similarity scores  
-  - “Social” mode filters weekend‑open vegetarian venues and uses chat for itinerary  
+- **Modes**  
+  - “Nostalgic” (similarity-based reordering) mode caches & reorders recommendations by user‑liked similarity scores
+  - “Adventure” (diversity-driven discovery) 
+  - “Social” mode filters recommendations by user profile-based affinity vectors and uses chat for itinerary
 
 ---
 
@@ -96,12 +116,16 @@ OPENAI_API_KEY=
 ELEVENLABS_API_KEY=
 ```
 
-## Install
+## Installation
 Conda Environment (Python)
 ```
 conda create -n qloo-ts python=3.10
 conda activate qloo-ts
 pip install -r requirements.txt
+```
+```
+# Optional: full reproducibility
+conda env export --name qloo-ts > environment.yml
 ```
 
 Node.js Setup (Next.js + TypeScript): default on http://localhost:3000
