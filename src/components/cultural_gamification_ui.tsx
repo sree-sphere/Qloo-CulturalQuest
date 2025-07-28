@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Trophy, MapPin, Zap, Gift, Compass, Heart } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+
+import { Trophy, MapPin, Zap, Star, Gift, Compass, Calendar, Heart } from 'lucide-react';
 import Image from 'next/image';
 
 // Qloo & SDK imports
@@ -7,10 +8,12 @@ import { Qloo } from '@devma/qloo';
 import { QlooCulturalGamification } from '../lib/qloo_gamification_sdk';
 
 // Initialize Qloo and gamification SDK
-const qloo = new Qloo({apiKey: process.env.NEXT_PUBLIC_QLOO_API_KEY || ''});
+const qloo = new Qloo({
+  apiKey: process.env.NEXT_PUBLIC_QLOO_API_KEY || ''  // 👈 must be accessible client-side
+});
 const gamification = new QlooCulturalGamification(qloo);
 
-// Mock user data
+// Mock user data with corrected location format
 const mockUser = {
   userId: 'user123',
   name: 'Priya Sharma',
@@ -21,12 +24,15 @@ const mockUser = {
   demographics: {
     age: '35_and_younger', // Changed from 29
     gender: 'female',
+    ethnicity: 'Indian',
+    religion: 'Hindu',
+    maritalStatus: 'single'
   },
   preferences: {
-    cuisines: ['Indian', 'Thai', 'Italian'],
-    culturalInterests: ['heritage', 'festivals', 'cuisine'],
-    travelStyle: 'authentic',
-    nostalgicPeriods: ['traditional'],
+    cuisines: ['Indian', 'Thai', 'Italian'], // Example based on achievements
+    culturalInterests: ['heritage', 'festivals', 'cuisine'], // Example interests
+    travelStyle: 'authentic', // Example travel style
+    nostalgicPeriods: ['traditional'], // Example nostalgic period
     isVegetarian: true
   },
   level: 7,
@@ -150,7 +156,37 @@ const reorderNostalgicRecommendations = (recommendations: any[], likedIds: Set<s
 
 const CACHE_KEY = 'nostalgic-recs';
 
+const checkImageUrl = async (url: string): Promise<boolean> => {
+  try {
+    const response = await fetch(url, { method: 'HEAD' });
+    const contentType = response.headers.get('content-type');
+    
+    // Check if it's actually an image and not the oops.png redirect
+    if (!response.ok || !contentType?.startsWith('image/')) {
+      return false;
+    }
+    
+    // Additional check for the oops.png redirect
+    if (response.url.includes('oops.png') || url.includes('oops.png')) {
+      return false;
+    }
+    
+    return true;
+  } catch (error) {
+    return false;
+  }
+};
 
+// Helper function for time formatting
+const formatTime = (timeStr: string) => {
+  if (!timeStr) return 'N/A';
+  const time = timeStr.substring(1); // Remove 'T'
+  const [hours, minutes] = time.split(':');
+  const hour = parseInt(hours);
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+  return `${displayHour}:${minutes} ${ampm}`;
+};
 
 const CulturalGamificationApp = () => {
   useEffect(() => {
@@ -166,7 +202,6 @@ const CulturalGamificationApp = () => {
       if (cached.length && cached[0]?.entityId) {
         // Reorder based on current likes
         const reordered = reorderNostalgicRecommendations(cached, new Set(storedLikes));
-        setRecommendations(reordered);
         // Update cache with new order
         localStorage.setItem(CACHE_KEY, JSON.stringify(reordered));
       }
@@ -196,6 +231,34 @@ const CulturalGamificationApp = () => {
   const [entityDetails, setEntityDetails] = useState<any>(null);
   const [showEntityModal, setShowEntityModal] = useState(false);
   const CACHE_KEY = 'nostalgic-recs';
+
+  const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
+  const [isVideoPlaying, setIsVideoPlaying] = useState(false);
+
+  const [redeemAnimations, setRedeemAnimations] = useState<{[key: string]: boolean}>({});
+  const [quickPromptLoading, setQuickPromptLoading] = useState<string | null>(null);
+
+
+  const [userPoints, setUserPoints] = useState(mockUser.points);
+  const [userLevel, setUserLevel] = useState(mockUser.level);
+  const [conversationHistory, setConversationHistory] = useState<Array<{role: string, content: string}>>([]);
+  // Load conversation history on mount
+  useEffect(() => {
+    const savedHistory = localStorage.getItem('conversation-history');
+    if (savedHistory) {
+      setConversationHistory(JSON.parse(savedHistory));
+    }
+  }, []);
+  useEffect(() => {
+  const newLevel = Math.floor(userPoints / 1000) + 1;
+  setUserLevel(newLevel);
+}, [userPoints]);
+
+  const handleImageError = (entityId: string) => {
+    setImageErrors(prev => new Set([...prev, entityId]));
+  };
 
   const handleHeartClick = async (entityId: string) => {
   // Trigger heart animation
@@ -243,9 +306,30 @@ const CulturalGamificationApp = () => {
 
   const handleLearnMore = async (entityId: string) => {
   try {
-    const entity = formattedRecommendations.find(r => r.entityId === entityId);
+    // Get full API data from localStorage
+    const fullApiData = JSON.parse(localStorage.getItem('full-api-responses') || '[]');
+    const entity = fullApiData.find(e => e.entity_id === entityId);
     if (entity) {
-      setEntityDetails(entity);
+      // Create enhanced entity details
+      const enhancedDetails = {
+        ...entity,
+        // Format hours for display
+        formattedHours: entity.properties?.hours ? Object.entries(entity.properties.hours).map(([day, times]) => ({
+          day,
+          times: times.map(t => `${formatTime(t.opens)} - ${formatTime(t.closes)}`).join(', ')
+        })) : [],
+        // Extract amenities
+        amenities: entity.tags?.filter(t => t.type.includes('amenity')).map(t => t.name) || [],
+        // Extract offerings
+        offerings: entity.tags?.filter(t => t.type.includes('offerings')).map(t => t.name) || [],
+        // Extract specialty dishes
+        specialtyDishes: entity.properties?.specialty_dishes?.map(d => d.name) || [],
+        // Format price range
+        priceRange: entity.properties?.price_range ? 
+          `$${entity.properties.price_range.from}-${entity.properties.price_range.to}` : null
+      };
+      
+      setEntityDetails(enhancedDetails);
       setShowEntityModal(true);
     }
   } catch (error) {
@@ -315,6 +399,7 @@ const CulturalGamificationApp = () => {
       );
       console.log('API response:', recPayload);
 
+      
       // Raw entity extraction
       // Dynamically extract entities based on response structure / forcedIntent
       const raw = recPayload as any;
@@ -335,12 +420,13 @@ const CulturalGamificationApp = () => {
         new Map(entities.map(e => [e.entity_id, e])).values()
       );
       console.log('Extracted entities:', uniqueEntities);
+      
 
       // SPECIAL “nostalgic” branch: shuffle, cache, format & exit
       if (mood === 'nostalgic') {
   const likedIds = new Set(JSON.parse(localStorage.getItem('liked-entities') || '[]'));
 
-  // 1. Format all entities
+  // 1. Format all entities first
   const formatted = uniqueEntities.map(entity => {
     const city = entity.properties?.geocode?.city;
     const categoryTag = entity.tags?.find(t => t.type.includes('category'))?.name;
@@ -373,7 +459,7 @@ const CulturalGamificationApp = () => {
     };
   });
 
-  // 2. helper function to reorder
+  // 2. Use the helper function to reorder
   const reordered = reorderNostalgicRecommendations(formatted, likedIds);
   
   localStorage.setItem(CACHE_KEY, JSON.stringify(reordered));
@@ -385,28 +471,39 @@ const CulturalGamificationApp = () => {
       
       // “Plan my weekend in Austin” chat branch
       if (intent === 'discover' && mood === 'social') {
-          // 1) filter for weekend‑open & vegetarian
-          const weekendOpen = uniqueEntities.filter(e => {
-            const hrs = e.properties.hours || {};
-            return hrs.Saturday?.length && hrs.Sunday?.length;
-          });
-          const vegOnly = weekendOpen.filter(e =>
-            e.tags?.some(t => /vegetarian/i.test(t.name))
-          );
-          // 2) take top 3
-          const top3 = vegOnly.slice(0, 3);
-          // 3) serialize minimal fields
-          const summary = top3.map(e => `
-        - ${e.name}
-          • ${e.properties.address}
-          • Hours: Sat ${e.properties.hours.Saturday[0].opens.slice(11)}–${e.properties.hours.Saturday[0].closes.slice(11)}, 
-                  Sun ${e.properties.hours.Sunday[0].opens.slice(11)}–${e.properties.hours.Sunday[0].closes.slice(11)}
-          • ${e.properties.description}
-        `).join('\n');
-          // 4) invoke chat
-          await handleChat(`Plan my weekend in Austin. Here are some options:${summary}`);
-          return;  // short‑circuit out of card rendering
-      }
+  // 1) filter for weekend‑open & vegetarian
+  const weekendOpen = uniqueEntities.filter(e => {
+    const hrs = e.properties?.hours || {};
+    const saturdayOpen = hrs.Saturday && hrs.Saturday.length > 0;
+    const sundayOpen = hrs.Sunday && hrs.Sunday.length > 0;
+    return saturdayOpen && sundayOpen;
+  });
+  
+  const vegOnly = weekendOpen.filter(e =>
+    e.tags?.some(t => /vegetarian|vegan/i.test(t.name)) ||
+    e.properties?.description?.toLowerCase().includes('vegetarian')
+  );
+  
+  // 2) take top 3
+  const top3 = vegOnly.slice(0, 3);
+  
+  // 3) Format hours properly
+  const summary = top3.map(e => {
+    const satHours = e.properties.hours?.Saturday?.[0];
+    const sunHours = e.properties.hours?.Sunday?.[0];
+    
+    return `
+- ${e.name}
+  • ${e.properties?.address || 'Address not available'}
+  • Hours: Sat ${formatTime(satHours?.opens)}–${formatTime(satHours?.closes)}, Sun ${formatTime(sunHours?.opens)}–${formatTime(sunHours?.closes)}
+  • ${e.properties?.description || 'No description available'}
+`;
+  }).join('\n');
+  
+  // 4) invoke chat
+  await handleChat(`Plan my weekend in Austin. Here are some vegetarian-friendly options that are open on weekends:${summary}`);
+  return;
+}
       
       // Default “discover” / other moods → map & render cards
       const formattedRecommendations = uniqueEntities.map(entity => {
@@ -477,71 +574,160 @@ const CulturalGamificationApp = () => {
   }
 };
 
-  const handleChat = async (message: string) => {
-    setChatOutput('');
-    setIsStreaming(true);
+  // Update the handleChat function with better context:
+const handleChat = async (message: string) => {
+  setChatOutput('');
+  setIsStreaming(true);
 
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message })
-    });
-    if (!res.ok) throw new Error('Chat API failed');
+  // Add to conversation history
+  const newHistory = [...conversationHistory, { role: 'user', content: message }];
+  setConversationHistory(newHistory);
+  localStorage.setItem('conversation-history', JSON.stringify(newHistory));
 
-    const reader = res.body!.getReader();
-    const decoder = new TextDecoder();
-    let done = false;
-    let buffer = '';
+  // Cycle through videos
+  const nextVideoIndex = Math.floor(Math.random() * 2);
+  setCurrentVideoIndex(nextVideoIndex);
+  
+  // Start video when streaming begins
+  if (videoRef.current) {
+    videoRef.current.currentTime = 0;
+    videoRef.current.play();
+  }
 
-    let partial = '';
-    while (!done) {
-      const { value, done: doneReading } = await reader.read();
-      done = doneReading;
-      const chunk = decoder.decode(value || new Uint8Array(), { stream: true });
+  // Enhanced context with full API response data
+  let contextMessage = message;
+  let apiContext = '';
 
-      partial += chunk;
-      const lines = partial.split('\n');
-      partial = lines.pop() || '';
+  // Build rich context from current recommendations
+  if (formattedRecommendations.length > 0) {
+    // Store the full API responses for context
+    const fullApiData = JSON.parse(localStorage.getItem('full-api-responses') || '[]');
+    
+    apiContext = fullApiData.map(entity => `
+Entity: ${entity.name} (${entity.entity_id})
+- Type: ${entity.type}
+- Description: ${entity.properties?.description || 'No description'}
+- Address: ${entity.properties?.address || 'No address'}
+- Rating: ${entity.properties?.business_rating || 'No rating'}
+- Phone: ${entity.properties?.phone || 'No phone'}
+- Website: ${entity.properties?.website || 'No website'}
+- Menu: ${entity.properties?.menu_url || 'No menu'}
+- Hours: ${JSON.stringify(entity.properties?.hours || {})}
+- Specialty Dishes: ${entity.properties?.specialty_dishes?.map(d => d.name).join(', ') || 'None'}
+- Price Range: $${entity.properties?.price_range?.from}-${entity.properties?.price_range?.to} ${entity.properties?.price_range?.currency || ''}
+- Good For: ${entity.properties?.good_for?.map(g => g.name).join(', ') || 'General dining'}
+- Amenities: ${entity.tags?.filter(t => t.type.includes('amenity')).map(t => t.name).join(', ') || 'None'}
+- Offerings: ${entity.tags?.filter(t => t.type.includes('offerings')).map(t => t.name).join(', ') || 'None'}
+    `).join('\n\n');
+  }
 
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const json = line.slice('data: '.length);
-        if (json === '[DONE]') break;
+  // Build comprehensive context message
+  contextMessage = `You are Sahayak, a friendly cultural tour guide for Austin. 
+  
+User Query: ${message}
 
-        try {
-          const parsed = JSON.parse(json);
-          const token = parsed.choices[0].delta?.content;
-          if (token) setChatOutput((prev) => prev + token);
-        } catch {
-          continue;
+Previous Conversation (last 6 exchanges):
+${conversationHistory.slice(-6).map(h => `${h.role}: ${h.content}`).join('\n')}
+
+Current Recommendations Context:
+${apiContext}
+
+Current day: ${new Date().toLocaleDateString('en-US', { weekday: 'long' })}
+Current time: ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+
+Instructions:
+- Reference previous conversation naturally
+- Use specific details from the API data when discussing places
+- Include hours, menu items, prices, and amenities when relevant
+- Be conversational and helpful
+- If asked about specific dishes, use the specialty_dishes data
+- If asked about timing, reference the hours data
+- Keep responses concise but informative`;
+
+  const res = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: contextMessage })
+  });
+  
+  if (!res.ok) throw new Error('Chat API failed');
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let done = false;
+  let responseContent = '';
+
+  let partial = '';
+  while (!done) {
+    const { value, done: doneReading } = await reader.read();
+    done = doneReading;
+    const chunk = decoder.decode(value || new Uint8Array(), { stream: true });
+
+    partial += chunk;
+    const lines = partial.split('\n');
+    partial = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const json = line.slice('data: '.length);
+      if (json === '[DONE]') break;
+
+      try {
+        const parsed = JSON.parse(json);
+        const token = parsed.choices[0].delta?.content;
+        if (token) {
+          responseContent += token;
+          setChatOutput((prev) => prev + token);
         }
+      } catch {
+        continue;
       }
     }
+  }
 
-    setIsStreaming(false);
-  };
+  // Add assistant response to history
+  const finalHistory = [...newHistory, { role: 'assistant', content: responseContent }];
+  setConversationHistory(finalHistory);
+  localStorage.setItem('conversation-history', JSON.stringify(finalHistory));
+
+  setIsStreaming(false);
+  // Pause video when streaming ends
+  if (videoRef.current) {
+    videoRef.current.pause();
+  }
+};
 
   const handleSpin = () => {
-    if (mockUser.points < 100) return;
+  if (userPoints < 100) return;
+  
+  setIsSpinning(true);
+  
+  // Deduct points immediately
+  const newPoints = userPoints - 100;
+  setUserPoints(newPoints);
+  
+  setTimeout(() => {
+    const rewards = [
+      { type: 'discount', value: '15% off', description: '15% off next booking', points: 0 },
+      { type: 'points', value: '500', description: '500 culture points', points: 500 },
+      { type: 'experience', value: 'guide', description: 'Free cultural guide', points: 0 }
+    ];
+    const reward = rewards[Math.floor(Math.random() * rewards.length)];
     
-    setIsSpinning(true);
+    // Add bonus points if reward is points
+    if (reward.points > 0) {
+      setUserPoints(prev => prev + reward.points);
+    }
     
-    setTimeout(() => {
-      const rewards = [
-        { type: 'discount', value: '15% off', description: '15% off next booking' },
-        { type: 'points', value: '500', description: '500 culture points' },
-        { type: 'experience', value: 'guide', description: 'Free cultural guide' }
-      ];
-      const reward = rewards[Math.floor(Math.random() * rewards.length)];
-      setSpinResult(reward);
-      setIsSpinning(false);
-    }, 3000);
-  };
+    setSpinResult(reward);
+    setIsSpinning(false);
+  }, 3000);
+};
 
   const getProgressPercentage = () => {
     const nextLevelPoints = mockUser.level * 1000;
-    const currentLevelProgress = mockUser.points % 1000;
-    return (currentLevelProgress / 1000) * 100;
+    const currentLevelProgress = userPoints % 1000;
+  return (currentLevelProgress / 1000) * 100;
   };
 
   return (
@@ -551,8 +737,14 @@ const CulturalGamificationApp = () => {
         <div className="max-w-6xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
-              <div className="w-12 h-12 bg-gradient-to-r from-orange-500 to-pink-500 rounded-full flex items-center justify-center text-white font-bold text-xl">
-                🌟
+              <div className="w-16 h-16 rounded-full overflow-hidden">
+                <Image
+                  src="/qloo_assets/images/image.webp"
+                  alt="Avatar"
+                  width={48}
+                  height={48}
+                  className="object-cover w-18 h-18"
+                />
               </div>
               <div>
                 <h1 className="text-white text-xl font-bold">CulturalQuest</h1>
@@ -562,13 +754,13 @@ const CulturalGamificationApp = () => {
             
             <div className="flex items-center space-x-6">
               <div className="flex items-center space-x-2 bg-white/10 backdrop-blur-sm rounded-full px-4 py-2">
-                <Zap className="w-4 h-4 text-yellow-400" />
-                <span className="text-white font-semibold">{mockUser.points.toLocaleString()}</span>
-              </div>
+  <Zap className="w-4 h-4 text-yellow-400" />
+  <span className="text-white font-semibold">{userPoints.toLocaleString()}</span>
+</div>
               <div className="flex items-center space-x-2 bg-white/10 backdrop-blur-sm rounded-full px-4 py-2">
-                <Trophy className="w-4 h-4 text-gold-400" />
-                <span className="text-white font-semibold">Level {mockUser.level}</span>
-              </div>
+  <Trophy className="w-4 h-4 text-yellow-400" /> {/* Using standard Tailwind class */}
+  <span className="text-white font-semibold">Level {userLevel}</span>
+</div>
             </div>
           </div>
         </div>
@@ -633,8 +825,8 @@ const CulturalGamificationApp = () => {
                 />
               </div>
               <p className="text-sm text-purple-200 mt-2">
-                {1000 - (mockUser.points % 1000)} points to level {mockUser.level + 1}
-              </p>
+{(userLevel * 1000 - userPoints).toLocaleString()} points to level {userLevel + 1}
+</p>
             </div>
 
             {/* AI Chat Interface */}
@@ -642,22 +834,43 @@ const CulturalGamificationApp = () => {
               <h3 className="text-xl font-bold text-white mb-4">What is on your mind today?</h3>
               
               {/* Quick Prompt Suggestions */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                {quickPrompts.map((s, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => {
-                      setUserInput(s.prompt);
-                      if (s.mood === 'nostalgic') loadNostalgic();
-                      else handleQuery(s.prompt, s.mood, s.intent);
-                    }}
-                    className={`bg-gradient-to-r ${s.color} rounded-2xl`}
-                  >
-                    <div className="text-2xl mb-2">{s.icon}</div>
-                    <p className="font-medium">{s.prompt}</p>
-                  </button>
-                ))}
-              </div>
+<div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+  {quickPrompts.map((s, idx) => (
+    <button
+      key={idx}
+      onClick={async () => {
+        setQuickPromptLoading(s.prompt);
+        setUserInput(s.prompt);
+        
+        try {
+          if (s.mood === 'nostalgic') {
+            await loadNostalgic();
+          } else {
+            await handleQuery(s.prompt, s.mood, s.intent);
+          }
+        } finally {
+          setQuickPromptLoading(null);
+        }
+      }}
+      disabled={quickPromptLoading === s.prompt}
+      className={`bg-gradient-to-r ${s.color} rounded-2xl p-6 text-white hover:scale-105 transition-all duration-200 relative ${
+        quickPromptLoading === s.prompt ? 'opacity-75' : ''
+      }`}
+    >
+      {quickPromptLoading === s.prompt && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded-2xl">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+        </div>
+      )}
+      <div className={`text-2xl mb-2 ${quickPromptLoading === s.prompt ? 'opacity-50' : ''}`}>
+        {s.icon}
+      </div>
+      <p className={`font-medium ${quickPromptLoading === s.prompt ? 'opacity-50' : ''}`}>
+        {s.prompt}
+      </p>
+    </button>
+  ))}
+</div>
 
               {/* Custom Input */}
               <div className="flex space-x-2">
@@ -683,15 +896,88 @@ const CulturalGamificationApp = () => {
               </div>
             </div>
 
-            {/* Chat Output */}
-            {chatOutput && (
-              <div className="bg-white/10 backdrop-blur-sm rounded-3xl p-6 border border-white/20">
-                <h3 className="text-xl font-bold text-white mb-4">💡 ChatGPT Suggestions</h3>
-                <div className="text-purple-100 whitespace-pre-line leading-relaxed font-mono">
-                  {chatOutput}
-                </div>
-              </div>
-            )}
+            {/* Chat Output with Video */}
+{chatOutput && (
+  <div className="bg-white/10 backdrop-blur-sm rounded-3xl border border-white/20 overflow-hidden relative">
+    {/* Creative Video Placement - Floating circular avatar */}
+    <div className="absolute top-4 right-4 z-20">
+  <div className="relative">
+    {/* Animated border ring */}
+    <div className="absolute inset-0 rounded-full bg-gradient-to-r from-purple-400 via-pink-400 to-blue-400" style={{ padding: '3px' }}>
+      <div className="w-full h-full rounded-full bg-black"></div>
+    </div>
+    
+    {/* Video container - Fixed size */}
+    <div className="relative w-65 h-26 rounded-full overflow-hidden border-2 border-white/20 bg-black">
+          {isStreaming || isVideoPlaying ? (
+  <video
+    ref={videoRef}
+    className="object-contain scale-100 -translate-y-4"
+    muted
+    loop={isStreaming}
+    playsInline
+    onPlay={() => setIsVideoPlaying(true)}
+    onEnded={() => {
+      setIsVideoPlaying(false);
+      if (!isStreaming && videoRef.current) {
+        videoRef.current.pause();
+      }
+    }}
+    onLoadedData={() => {
+      if (videoRef.current && isStreaming) {
+        videoRef.current.currentTime = 0;
+        videoRef.current.play();
+      }
+    }}
+  >
+    <source src={`/qloo_assets/videos/vid${currentVideoIndex + 1}.mp4`} type="video/mp4" />
+  </video>
+) : (
+  <Image
+    src="/qloo_assets/images/image.webp" // <-- provide your fallback image path
+    alt="Video Fallback"
+    width={120}
+    height={120}
+    className="rounded-full object-contain"
+  />
+)}
+
+
+          
+          {/* Overlay when not playing */}
+          {!isVideoPlaying && (
+            <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+              <div className="w-3 h-3 rounded-full bg-white opacity-60"></div>
+            </div>
+          )}
+        </div>
+    
+    {/* Pulse effect when streaming */}
+    {isStreaming && (
+          <div className="absolute inset-0 rounded-full bg-gradient-to-r from-purple-400/20 to-pink-400/20 animate-ping"></div>
+        )}
+  </div>
+</div>
+
+    {/* Chat content with proper padding to avoid video */}
+    <div className="p-8 pr-44"> {/* Increased right padding */}
+<h3 className="text-xl font-bold text-white mb-4 flex items-center hover:text-purple-400 transition-colors duration-300">
+          Sahayak Suggestions
+        {isStreaming && (
+          <div className="ml-3 flex space-x-1">
+            <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce"></div>
+            <div className="w-2 h-2 bg-pink-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+            <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+          </div>
+        )}
+      </h3>
+      <div className="text-purple-100 whitespace-pre-line leading-relaxed font-mono max-w-[calc(100%-4rem)]"> {/* Added max-width */}
+        {chatOutput}
+        {isStreaming && <span className="animate-pulse">|</span>}
+      </div>
+    </div>
+  </div>
+)}
 
             {/* Recommendations */}
             {formattedRecommendations.length > 0 ? (
@@ -711,19 +997,40 @@ const CulturalGamificationApp = () => {
                             transitionDelay: `${i * 50}ms` // Staggered animation
                           }}
                         >
-                      {/* 1) Image */}
-                      {rec.image ? (
-                        <Image
-                          src={rec.image}
-                          alt={rec.name}
-                          width={400}  // adjust as needed
-                          height={180}
-                          className="w-full h-32 object-cover rounded-xl mb-3"
-                          unoptimized // (optional) if images aren't hosted on a Next-optimized domain
-                        />
-                      ) : (
-                        <div className="text-5xl text-center mb-3">{rec.emoji}</div>
-                      )}
+                      {/* Image with Error Handling */}
+{rec.image && !imageErrors.has(rec.entityId) ? (
+  <Image
+    src={rec.image}
+    alt={rec.name}
+    width={400}
+    height={180}
+    className="w-full h-32 object-cover rounded-xl mb-3"
+    unoptimized
+    onError={async () => {
+      // Double-check the URL before marking as error
+      const isValid = await checkImageUrl(rec.image);
+      if (!isValid) {
+        handleImageError(rec.entityId);
+      }
+    }}
+    onLoad={async (e) => {
+      // Check if the loaded image is actually the oops.png
+      const img = e.target as HTMLImageElement;
+      if (img.src.includes('oops.png') || img.naturalWidth === 1 || img.naturalHeight === 1) {
+        handleImageError(rec.entityId);
+      }
+    }}
+  />
+) : (
+  <Image
+    src="/qloo_assets/images/image.webp"
+    alt={rec.name}
+    width={400}
+    height={180}
+    className="w-full h-32 object-cover rounded-xl mb-3"
+  />
+)}
+
 
                       {/* 2) Title + Type */}
                       <h4 className="text-lg font-semibold">{rec.name}</h4>
@@ -778,14 +1085,14 @@ const CulturalGamificationApp = () => {
     ) : null
   ))}
   {showEntityModal && entityDetails && (
-  <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-    <div className="bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+  <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 overflow-y-auto">
+  <div className="flex justify-center min-h-screen p-6 pt-120">
+    <div className="bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 max-w-4xl w-full">
       <div className="p-6">
         {/* Header */}
         <div className="flex justify-between items-start mb-6">
           <div>
             <h2 className="text-2xl font-bold text-white mb-2">{entityDetails.name}</h2>
-            <p className="text-purple-200">{entityDetails.type}</p>
           </div>
           <button
             onClick={() => setShowEntityModal(false)}
@@ -797,47 +1104,114 @@ const CulturalGamificationApp = () => {
           </button>
         </div>
 
-        {/* Image */}
-        {entityDetails.image && (
-          <div className="mb-6">
-            <Image
-              src={entityDetails.image}
-              alt={entityDetails.name}
-              width={600}
-              height={300}
-              className="w-full h-64 object-cover rounded-2xl"
-              unoptimized
-            />
+        {/* Image with Error Handling */}
+{entityDetails.image && !imageErrors.has(entityDetails.entityId) ? (
+  <div className="relative w-full mb-6 aspect-video rounded-2xl overflow-hidden bg-black">
+  <Image
+    src={entityDetails.image}
+    alt={entityDetails.name}
+    fill
+    className="object-contain"
+    unoptimized
+    onError={() => handleImageError(entityDetails.entityId)}
+  />
+</div>
+) : (
+  <div className="mb-6">
+    <Image
+      src="/qloo_assets/images/image_expanded.jpg"
+      alt={entityDetails.name}
+      width={600}
+      height={300}
+      className="w-full h-64 object-cover rounded-2xl"
+    />
+  </div>
+)}
+
+        {/* Enhanced Details Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          {/* Hours */}
+          {entityDetails.formattedHours?.length > 0 && (
+            <div className="bg-white/10 rounded-2xl p-4">
+              <h3 className="text-white font-semibold mb-2">Hours</h3>
+              <div className="space-y-1">
+                {entityDetails.formattedHours.map(hour => (
+                  <div key={hour.day} className="flex justify-between text-sm">
+                    <span className="text-purple-200">{hour.day}:</span>
+                    <span className="text-white">{hour.times}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Price Range */}
+          {entityDetails.priceRange && (
+            <div className="bg-white/10 rounded-2xl p-4">
+              <h3 className="text-white font-semibold mb-2">Price Range</h3>
+              <p className="text-green-400 text-lg">{entityDetails.priceRange}</p>
+            </div>
+          )}
+
+          {/* Contact Info */}
+          <div className="bg-white/10 rounded-2xl p-4">
+            <h3 className="text-white font-semibold mb-2">Contact</h3>
+            {entityDetails.properties?.phone && (
+              <p className="text-purple-200 text-sm mb-1">{entityDetails.properties.phone}</p>
+            )}
+          </div>
+
+          {/* Menu Link */}
+          {entityDetails.properties?.menu_url && (
+            <div className="bg-white/10 rounded-2xl p-4">
+              <h3 className="text-white font-semibold mb-2">Menu</h3>
+              <a href={entityDetails.properties.menu_url} target="_blank" rel="noopener noreferrer"
+                 className="text-green-400 hover:text-green-300 text-sm">
+                View Menu
+              </a>
+            </div>
+          )}
+        </div>
+
+        {/* Specialty Dishes */}
+        {entityDetails.specialtyDishes?.length > 0 && (
+          <div className="bg-white/10 rounded-2xl p-4 mb-6">
+            <h3 className="text-white font-semibold mb-2">Specialty Dishes</h3>
+            <div className="flex flex-wrap gap-2">
+              {entityDetails.specialtyDishes.map((dish, idx) => (
+                <span key={idx} className="bg-gradient-to-r from-orange-500 to-red-500 text-white px-3 py-1 rounded-full text-xs">
+                  {dish}
+                </span>
+              ))}
+            </div>
           </div>
         )}
 
-        {/* Details Grid */}
+        {/* Amenities & Offerings */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          {entityDetails.ratingStars && (
+          {entityDetails.amenities?.length > 0 && (
             <div className="bg-white/10 rounded-2xl p-4">
-              <h3 className="text-white font-semibold mb-2">Rating</h3>
-              <p className="text-yellow-400 text-lg">{entityDetails.ratingStars}</p>
+              <h3 className="text-white font-semibold mb-2">Amenities</h3>
+              <div className="flex flex-wrap gap-1">
+                {entityDetails.amenities.map((amenity, idx) => (
+                  <span key={idx} className="bg-blue-500/20 text-blue-200 px-2 py-1 rounded text-xs">
+                    {amenity}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
-          
-          {entityDetails.distance && (
+
+          {entityDetails.offerings?.length > 0 && (
             <div className="bg-white/10 rounded-2xl p-4">
-              <h3 className="text-white font-semibold mb-2">Distance</h3>
-              <p className="text-purple-200">{entityDetails.distance}</p>
-            </div>
-          )}
-          
-          {entityDetails.affinity && (
-            <div className="bg-white/10 rounded-2xl p-4">
-              <h3 className="text-white font-semibold mb-2">Match Score</h3>
-              <p className="text-green-400">{entityDetails.affinity}</p>
-            </div>
-          )}
-          
-          {entityDetails.address && (
-            <div className="bg-white/10 rounded-2xl p-4">
-              <h3 className="text-white font-semibold mb-2">Address</h3>
-              <p className="text-purple-200 text-sm">{entityDetails.address}</p>
+              <h3 className="text-white font-semibold mb-2">Offerings</h3>
+              <div className="flex flex-wrap gap-1">
+                {entityDetails.offerings.map((offering, idx) => (
+                  <span key={idx} className="bg-green-500/20 text-green-200 px-2 py-1 rounded text-xs">
+                    {offering}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -864,18 +1238,27 @@ const CulturalGamificationApp = () => {
           </button>
           
           <button
-            onClick={() => {
-              // Add gamification points for viewing details
-              console.log('Viewed entity details:', entityDetails.entityId);
-              setShowEntityModal(false);
-            }}
-            className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 text-white py-3 rounded-2xl font-semibold hover:scale-105 transition-transform"
-          >
-            Visit Now
-          </button>
+  onClick={() => {
+    if (entityDetails.properties?.website) {
+      window.open(entityDetails.properties.website, '_blank');
+    }
+    console.log('Viewed entity details:', entityDetails.entityId);
+    setShowEntityModal(false);
+  }}
+  disabled={!entityDetails.properties?.website}
+  className={`flex-1 py-3 rounded-2xl font-semibold transition-all ${
+    entityDetails.properties?.website
+      ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:scale-105'
+      : 'bg-gray-500 text-gray-300 cursor-not-allowed'
+  }`}
+>
+  Visit Now
+</button>
+
         </div>
       </div>
     </div>
+  </div>
   </div>
 )}
 </div>
@@ -951,46 +1334,57 @@ const CulturalGamificationApp = () => {
         {/* Rewards Tab */}
         {activeTab === 'rewards' && (
           <div className="space-y-6">
-            {/* Spin Wheel Section */}
-            <div className="bg-white/10 backdrop-blur-sm rounded-3xl p-8 border border-white/20 text-center">
-              <h3 className="text-2xl font-bold text-white mb-4">🎰 Spin the Cultural Wheel!</h3>
-              <p className="text-purple-200 mb-6">Use 100 points for a chance to win amazing rewards</p>
-              
-              <div className="relative mx-auto mb-6" style={{width: '200px', height: '200px'}}>
-                <div className={`w-full h-full rounded-full bg-gradient-to-r from-yellow-400 via-pink-500 to-purple-500 ${isSpinning ? 'animate-spin' : ''}`}>
-                  <div className="absolute inset-4 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center">
-                    <div className="text-4xl">
-                      {isSpinning ? '🌀' : '🎁'}
-                    </div>
-                  </div>
-                </div>
-                <div className="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-2">
-                  <div className="w-0 h-0 border-l-4 border-r-4 border-b-8 border-l-transparent border-r-transparent border-b-white"></div>
-                </div>
-              </div>
+            {/* Spin Wheel + Floating Image Section */}
+<div className="relative">
+  {/* Floating Character Image (bottom-right) */}
+  <img
+    src="/qloo_assets/images/prize.png"
+    alt="Prize character"
+    className="hidden lg:block absolute bottom-0 right-0 w-80 object-contain z-10 pointer-events-none"
+  />
 
-              <button
-                onClick={() => {
-                  setShowSpinWheel(true);
-                  handleSpin();
-                }}
-                disabled={mockUser.points < 100 || isSpinning}
-                className={`px-8 py-4 rounded-2xl font-bold text-lg transition-all duration-200 ${
-                  mockUser.points >= 100 && !isSpinning
-                    ? 'bg-gradient-to-r from-yellow-400 to-orange-500 text-black hover:scale-105'
-                    : 'bg-gray-500 text-gray-300 cursor-not-allowed'
-                }`}
-              >
-                {isSpinning ? 'Spinning...' : `Spin (100 points)`}
-              </button>
+  {/* Spin Wheel Section */}
+  <div className="bg-white/10 backdrop-blur-sm rounded-3xl p-8 border border-white/20 text-center relative z-0">
+    <h3 className="text-2xl font-bold text-white mb-4">🎰 Spin the Cultural Wheel!</h3>
+    <p className="text-purple-200 mb-6">Use 100 points for a chance to win amazing rewards</p>
 
-              {spinResult && (
-                <div className="mt-6 bg-gradient-to-r from-green-500 to-teal-500 rounded-2xl p-4">
-                  <h4 className="text-white font-bold text-lg mb-2">🎉 Congratulations!</h4>
-                  <p className="text-white">{spinResult.description}</p>
-                </div>
-              )}
-            </div>
+    <div className="relative mx-auto mb-6" style={{ width: '200px', height: '200px' }}>
+      <div className={`w-full h-full rounded-full bg-gradient-to-r from-yellow-400 via-pink-500 to-purple-500 ${isSpinning ? 'animate-spin' : ''}`}>
+        <div className="absolute inset-4 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center">
+          <div className="text-4xl">
+            {isSpinning ? '🌀' : '🎁'}
+          </div>
+        </div>
+      </div>
+      <div className="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-2">
+        <div className="w-0 h-0 border-l-4 border-r-4 border-b-8 border-l-transparent border-r-transparent border-b-white"></div>
+      </div>
+    </div>
+
+    <button
+      onClick={() => {
+        setShowSpinWheel(true);
+        handleSpin();
+      }}
+      disabled={mockUser.points < 100 || isSpinning}
+      className={`px-8 py-4 rounded-2xl font-bold text-lg transition-all duration-200 ${
+        mockUser.points >= 100 && !isSpinning
+          ? 'bg-gradient-to-r from-yellow-400 to-orange-500 text-black hover:scale-105'
+          : 'bg-gray-500 text-gray-300 cursor-not-allowed'
+      }`}
+    >
+      {isSpinning ? 'Spinning...' : `Spin (100 points)`}
+    </button>
+
+    {spinResult && (
+      <div className="mt-6 bg-gradient-to-r from-green-500 to-teal-500 rounded-2xl p-4">
+        <h4 className="text-white font-bold text-lg mb-2">🎉 Congratulations!</h4>
+        <p className="text-white">{spinResult.description}</p>
+      </div>
+    )}
+  </div>
+</div>
+
 
             {/* Available Rewards */}
             <div className="bg-white/10 backdrop-blur-sm rounded-3xl p-6 border border-white/20">
@@ -1010,15 +1404,37 @@ const CulturalGamificationApp = () => {
                     <div className="flex justify-between items-center">
                       <span className="text-yellow-400 font-semibold">{reward.cost} pts</span>
                       <button
-                        disabled={mockUser.points < reward.cost}
-                        className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
-                          mockUser.points >= reward.cost
-                            ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:scale-105'
-                            : 'bg-gray-500 text-gray-300 cursor-not-allowed'
-                        }`}
-                      >
-                        Redeem
-                      </button>
+  disabled={userPoints < reward.cost || redeemAnimations[reward.name]}
+  onClick={() => {
+    if (userPoints >= reward.cost) {
+      setRedeemAnimations(prev => ({ ...prev, [reward.name]: true }));
+      setUserPoints(prev => prev - reward.cost);
+      
+      setTimeout(() => {
+        setRedeemAnimations(prev => ({ ...prev, [reward.name]: false }));
+      }, 1500); // Longer animation
+    }
+  }}
+  className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-500 ease-in-out transform ${
+    userPoints >= reward.cost
+      ? redeemAnimations[reward.name]
+        ? 'bg-gradient-to-r from-green-400 to-teal-500 text-white scale-110 shadow-lg animate-bounce' 
+        : 'bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:scale-105 hover:shadow-md'
+      : 'bg-gray-500 text-gray-300 cursor-not-allowed opacity-50'
+  }`}
+>
+  <span className={`flex items-center justify-center ${redeemAnimations[reward.name] ? 'animate-pulse' : ''}`}>
+    {redeemAnimations[reward.name] ? (
+      <>
+        <span className="mr-1">✨</span>
+        Redeemed!
+        <span className="ml-1">✨</span>
+      </>
+    ) : (
+      'Redeem'
+    )}
+  </span>
+</button>
                     </div>
                   </div>
                 ))}
@@ -1029,32 +1445,32 @@ const CulturalGamificationApp = () => {
             <div className="bg-white/10 backdrop-blur-sm rounded-3xl p-6 border border-white/20">
               <h3 className="text-xl font-bold text-white mb-6">🏆 Cultural Explorers Leaderboard</h3>
               <div className="space-y-3">
-                {[
-                  { rank: 1, name: 'Arjun Patel', points: 12500, badge: '🥇' },
-                  { rank: 2, name: 'Maya Singh', points: 9800, badge: '🥈' },
-                  { rank: 3, name: 'Priya Sharma', points: 6850, badge: '🥉', isCurrentUser: true },
-                  { rank: 4, name: 'Ravi Kumar', points: 5200, badge: '4️⃣' },
-                  { rank: 5, name: 'Anya Gupta', points: 4900, badge: '5️⃣' }
-                ].map((user, idx) => (
-                  <div key={idx} className={`flex items-center justify-between p-4 rounded-2xl transition-colors ${
-                    user.isCurrentUser ? 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-400/30' : 'bg-white/5'
-                  }`}>
-                    <div className="flex items-center space-x-4">
-                      <span className="text-2xl">{user.badge}</span>
-                      <div>
-                        <p className={`font-semibold ${user.isCurrentUser ? 'text-yellow-300' : 'text-white'}`}>
-                          {user.name} {user.isCurrentUser && '(You)'}
-                        </p>
-                        <p className="text-purple-200 text-sm">Cultural Explorer</p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-bold text-white">{user.points.toLocaleString()}</p>
-                      <p className="text-purple-200 text-sm">points</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
+  {[
+    { rank: 1, name: 'Arjun Patel', points: 12500, badge: '🥇' },
+    { rank: 2, name: 'Maya Singh', points: 9800, badge: '🥈' },
+    { rank: 3, name: 'Priya Sharma', points: userPoints, badge: '🥉', isCurrentUser: true },
+    { rank: 4, name: 'Ravi Kumar', points: 5200, badge: '4️⃣' },
+    { rank: 5, name: 'Anya Gupta', points: 4900, badge: '5️⃣' }
+  ].sort((a, b) => b.points - a.points).map((user, idx) => (
+    <div key={idx} className={`flex items-center justify-between p-4 rounded-2xl transition-colors ${
+      user.isCurrentUser ? 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-400/30' : 'bg-white/5'
+    }`}>
+      <div className="flex items-center space-x-4">
+        <span className="text-2xl">{user.badge}</span>
+        <div>
+          <p className={`font-semibold ${user.isCurrentUser ? 'text-yellow-300' : 'text-white'}`}>
+            {user.name} {user.isCurrentUser && '(You)'}
+          </p>
+          <p className="text-purple-200 text-sm">Cultural Explorer</p>
+        </div>
+      </div>
+      <div className="text-right">
+        <p className="font-bold text-white">{user.points.toLocaleString()}</p>
+        <p className="text-purple-200 text-sm">points</p>
+      </div>
+    </div>
+  ))}
+</div>
             </div>
           </div>
         )}

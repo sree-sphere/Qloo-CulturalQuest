@@ -635,7 +635,7 @@ export class CulturalAppExample {
     if (query.toLowerCase().includes('nostalgic')) {
       return await this.gamification.getContextualRecommendations(userId, {
         mood: 'nostalgic',
-        intent: 'explore',
+        intent: 'experience',
         context: query
       });
     }
@@ -647,7 +647,7 @@ export class CulturalAppExample {
     if (query.toLowerCase().includes('completely new')) {
       return await this.gamification.getContextualRecommendations(userId, {
         mood: 'adventurous',
-        intent: 'discover',
+        intent: 'explore',
         context: query
       });
     }
