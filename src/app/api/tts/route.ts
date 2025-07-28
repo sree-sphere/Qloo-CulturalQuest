@@ -19,12 +19,12 @@ export async function POST(request: NextRequest) {
     const audioResponse = await elevenlabs.textToSpeech.convert('gs0tAILXbY5DNrJrsM6F', {
       text: text,
       modelId: 'eleven_multilingual_v2',
-      output_format: 'mp3_44100_128', // Good balance of quality and size
-      voice_settings: {
+      outputFormat: 'mp3_44100_128', // Good balance of quality and size
+      voiceSettings: {
         stability: 0.75,
-        similarity_boost: 0.75,
+        similarityBoost: 0.75,
         style: 0.5,
-        use_speaker_boost: true
+        useSpeakerBoost: true
       }
     });
 
