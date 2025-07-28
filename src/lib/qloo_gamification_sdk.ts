@@ -2,6 +2,12 @@
 // Built on top of Qloo TypeScript SDK
 
 import { Qloo } from '@devma/qloo';
+const qloo = new Qloo({
+  apiKey: process.env.NEXT_PUBLIC_QLOO_API_KEY || ''  // 👈 must be accessible client-side
+});
+if (!process.env.NEXT_PUBLIC_QLOO_API_KEY) {
+  console.warn('❗️Missing NEXT_PUBLIC_QLOO_API_KEY in environment');
+}
 
 // Types and Interfaces
 interface UserProfile {
@@ -69,7 +75,8 @@ interface ContextualPrompt {
 // Main Gamification Class
 export class QlooCulturalGamification {
   private qloo: Qloo;
-  private userProfiles: Map<string, UserProfile> = new Map();
+  // private userProfiles: Map<string, UserProfile> = new Map();
+  private userProfiles = new Map<string, UserProfile>();
   private userProgress: Map<string, UserProgress> = new Map();
 
   // Predefined badges for cultural exploration
@@ -118,6 +125,11 @@ export class QlooCulturalGamification {
     { type: 'badge', value: 'lucky_explorer', description: 'Lucky Explorer badge', probability: 0.05 }
   ];
 
+  
+  registerUserProfile(userProfile: UserProfile) {
+    this.userProfiles.set(userProfile.userId, userProfile);
+  }
+
   constructor(qloo: Qloo) {
     this.qloo = qloo;
   }
@@ -162,10 +174,10 @@ export class QlooCulturalGamification {
 
   private async buildContextualSignals(profile: UserProfile, prompt: ContextualPrompt) {
     const signals: any = {
-      signalDemographicsAge: profile.demographics.age
+      signalDemographicsAge: profile?.demographics?.age ?? 30
     };
 
-    if (profile.demographics.gender) {
+    if (profile?.demographics?.gender) {
       signals.signalDemographicsGender = profile.demographics.gender;
     }
 
@@ -187,7 +199,7 @@ export class QlooCulturalGamification {
 
     // Add context-specific filters
     if (prompt.context.toLowerCase().includes('weekend')) {
-      filters.filterHours = 'weekend';
+      filters.filterHours = 'saturday';
     }
 
     if (prompt.context.toLowerCase().includes('budget')) {
@@ -198,32 +210,30 @@ export class QlooCulturalGamification {
   }
 
   private async getNostalgicRecommendations(signals: any, filters: any, profile: UserProfile) {
-    // Focus on heritage sites, traditional restaurants, vintage experiences
     const heritageResults = await this.qloo.insights.getInsights({
       filterType: 'urn:entity:place',
       ...signals,
-      signalInterestsTags: [
-        'urn:tag:category:heritage',
-        'urn:tag:category:traditional',
-        'urn:tag:category:historical'
-      ],
-      ...filters,
-      filterTags: ['urn:tag:attribute:historic', 'urn:tag:attribute:traditional'],
+      signalInterestsTags: profile.preferences.culturalInterests.map(ci => `urn:tag:category:${ci}`),
+      filterLocationQuery: 'Austin',
+      // take: 15,
       featureExplainability: true
     });
 
-    // Get traditional cuisine recommendations
     const cuisineResults = await this.qloo.insights.getInsights({
       filterType: 'urn:entity:place',
       ...signals,
       signalInterestsTags: profile.preferences.cuisines.map(c => `urn:tag:genre:restaurant:${c}`),
-      ...filters,
-      filterTags: ['urn:tag:attribute:authentic', 'urn:tag:attribute:traditional']
+      filterLocationQuery: 'Austin',
+      // take: 15,
+      featureExplainability: true
     });
 
+    const heritageEntities = heritageResults.results?.entities || [];
+    const cuisineEntities = cuisineResults.results?.entities || [];
+    const entities = [...heritageEntities, ...cuisineEntities];
+
     return {
-      heritage: heritageResults,
-      cuisine: cuisineResults,
+      entities,
       mood: 'nostalgic',
       explanation: 'Curated based on your nostalgic mood and cultural preferences'
     };
@@ -241,7 +251,7 @@ export class QlooCulturalGamification {
       ],
       ...filters,
       filterPopularityMax: 0.7, // Less mainstream options
-      diversifyBy: 'properties.subtype',
+      diversifyBy: 'properties.geocode.city',
       diversifyTake: 2
     });
 
@@ -274,12 +284,19 @@ export class QlooCulturalGamification {
   }
 
   private async getGeneralRecommendations(signals: any, filters: any) {
-    return await this.qloo.insights.getInsights({
+    const apiResponse = await this.qloo.insights.getInsights({
       filterType: 'urn:entity:place',
       ...signals,
       ...filters,
       featureExplainability: true
     });
+
+    const entities = apiResponse.results?.entities || [];
+    return {
+      entities,
+      mood: 'relaxed',
+      explanation: 'General recommendations based on your preferences'
+    };
   }
 
   // Gamification Features
@@ -547,8 +564,43 @@ export class QlooCulturalGamification {
     
     return festivalTagMap[festival.toLowerCase()] || ['urn:tag:category:festival'];
   }
-}
+  /** Stream ChatGPT tokens back via callback */
+  async streamChat(
+      messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+      onToken: (token: string) => void
+    ) {
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages,
+        stream: true
+      })
+    });
+    const reader = resp.body!.getReader();
+    const decoder = new TextDecoder();
+    let done = false;
+    let buf = '';
 
+    while (!done) {
+      const { value, done: rDone } = await reader.read();
+      done = rDone;
+      buf = decoder.decode(value || new Uint8Array(), { stream: true });
+      buf.split('\n').forEach((line) => {
+        if (!line.startsWith('data: ')) return;
+        const data = line.replace(/^data: /, '');
+        if (data === '[DONE]') return;
+        const parsed = JSON.parse(data);
+        const token = parsed.choices[0].delta?.content;
+        if (token) onToken(token);
+      });
+    }
+  }
+}
 // Usage Example
 export class CulturalAppExample {
   private gamification: QlooCulturalGamification;
