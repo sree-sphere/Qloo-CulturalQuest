@@ -2,7 +2,7 @@
 
 A gamified cultural exploration platform that helps new migrants and cultural enthusiasts discover authentic local experiences through AI-powered recommendations, interactive chat, and immersive rewards system.
 
-CulturalQuest blends Qloo’s Taste AI™ with OpenAI’s ChatGPT and ElevenLabs TTS to redefine personalized discovery. CulturalQuest uses advanced recommendation‑system techniques (semantic embeddings, MMR, affinity‑diversity trade‑off) with an engaging, points‑n‑badges UX.
+CulturalQuest blends Qloo’s Taste AI™ with OpenAI’s ChatGPT and ElevenLabs TTS to redefine personalized discovery. CulturalQuest uses advanced multi-stage recommendation‑system techniques — semantic embeddings, contextual bandit learning (a form of online reinforcement learning), and MMR-based diversification — to balance affinity and novelty. The experience is wrapped in a points-and-badges UX to drive discovery through exploration. 
 
 ---
 
@@ -27,10 +27,17 @@ Today, Austin is home to **≈296,000 foreign-born residents** (14% of the city'
 
 ## ✨ Features
 
-- **Contextual Recommendations**  
-  - Uses a **semantic similarity** pipeline via SentenceTransformer embeddings (`all-MiniLM-L6-v2`) + **cosine similarity**  
-  - Applies **Maximal Marginal Relevance (MMR)** two‑phase selection to balance **relevance** (λ≈0.7) and **novelty/diversity** (λ≈0.3)  
-  - Supports high‑affinity “top‑k” picks and diversified fill‑ins for rich discovery  
+- **Recommendation System Architecture: Hybrid Multi-Stage Pipeline**  
+  - **Stage 1**: Semantic Retrieval via Embedding
+    1. Computes sentence-level embeddings for all available entities using SentenceTransformer (`all-MiniLM-L6-v2`) with cosine similarity for initial selection
+    2. Fast re-ranking with cache & streaming support
+  - **Stage 2**: Contextual Bandit scoring via Vowpal Wabbit (CB mode of online **Reinforcement Learning** without state transition)
+    1. **Vowpal Wabbit** (CB learning), the engine learns a lightweight contextual bandit model based on past user interactions (includes *quantized embeddings*, tags, cuisine types, price, rating, and derived context features)
+    2. Predicts exploration‑aware scores for entities (used in final MMR re‑ranking)
+    3. Training pipeline supports feature engineering and vectorized learning with CB-formatted input
+  - **Stage 3**: MMR-based diversification with λ-tunable filtering regarding exploration-exploitation trade-off
+    1. Applies **Maximal Marginal Relevance (MMR)** two‑phase selection to balance **relevance** (λ≈0.7) and **novelty/diversity** (λ≈0.3)  
+    2. Supports high‑affinity “top‑k” picks and boosts diversified fill‑ins for rich discovery. `Eg: Picks 3 high-affinity entities + 2 serendipitous ones from new places.`
 
 - **Cultural Gamification**  
   - Points, levels, badges (like “Festival of Lights Explorer”) via `qloo_gamification_sdk.ts`  
@@ -59,10 +66,12 @@ Today, Austin is home to **≈296,000 foreign-born residents** (14% of the city'
 - **Backend**: Next.js API routes (`route.ts`)  
   - `chat/route.ts` → OpenAI Chat API  
   - `tts/route.ts`  → ElevenLabs TTS API  
-- **Python ML Engine** (`smart_diversification.py`):  
-  - `sentence-transformers`  
-  - `scikit‑learn` (cosine_similarity)  
-  - NumPy for diversity metrics  
+- **Python ML Engine** (`smart_diversification.py`):
+  - `sentence-transformers` for semantic embedding
+  - `scikit-learn` for cosine similarity
+  - `vowpalwabbit` for contextual bandit training (CB)
+  - `MMR (Maximal Marginal Relevance)` diversification with affinity-novelty scoring
+  - `NumPy` for vector operations and diversity analytics
 - **SDKs**:  
   - `@devma/qloo` + `QlooCulturalGamification`  
 - **Environment**:  
@@ -87,7 +96,7 @@ Today, Austin is home to **≈296,000 foreign-born residents** (14% of the city'
 │   │   └── cultural_gamification_ui.tsx    # React Gamification UI component (main)
 │   └── lib/
 │       └── qloo_gamification_sdk.ts        # Qloo SDK wrapper
-├── smart_diversification.py                # Offline diversification script
+├── diversification_engine.py                # Offline diversification script
 ├── requirements.txt
 ├── package.json                            # Node.js deps & scripts
 ├── tsconfig.json
@@ -133,5 +142,3 @@ Node.js Setup (Next.js + TypeScript): default on http://localhost:3000
 npm install
 npm run dev
 ```
-
----

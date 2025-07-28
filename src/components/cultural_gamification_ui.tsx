@@ -271,7 +271,18 @@ useEffect(() => {
     }
   }, [userAffinityVector]);
 
-  const [userPoints, setUserPoints] = useState(mockUser.points);
+  const [userPoints, setUserPoints] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const cached = localStorage.getItem('user-points');
+      return cached ? JSON.parse(cached) : mockUser.points;
+    }
+    return mockUser.points;
+  });
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('user-points', JSON.stringify(userPoints));
+    }
+  }, [userPoints]);
   const [userLevel, setUserLevel] = useState(mockUser.level);
   const [showAltSubtitle, setShowAltSubtitle] = useState(false);
   useEffect(() => {
@@ -431,6 +442,12 @@ useEffect(() => {
   setTimeout(() => setHeartAnimation(null), 600);
 
   const wasLiked = likedPlaces.has(entityId);
+  if (!wasLiked) {
+    const newPoints = userPoints + 50;
+    setUserPoints(newPoints);
+    localStorage.setItem('user-points', JSON.stringify(newPoints));
+  }
+
   updateUserAffinity(entityId, wasLiked ? 'unlike' : 'like');
 
   setLikedPlaces(prev => {
@@ -454,7 +471,8 @@ useEffect(() => {
         if (cached.length && cached[0]?.entityId) {
           setIsReordering(true);
           setTimeout(() => {
-            const reordered = reorderNostalgicRecommendations(cached, next, userAffinityVector);
+            const updatedInteractions = collectInteractionHistory();
+            const reordered = reorderNostalgicRecommendations(cached, next, userAffinityVector, updatedInteractions);
             setRecommendations(reordered);
             localStorage.setItem(contextCacheKey, JSON.stringify(reordered));
             setTimeout(() => setIsReordering(false), 300);
@@ -470,86 +488,152 @@ useEffect(() => {
   });
 };
 
-  const diversifyRecommendations = async (entities: any[], userPrefs: string[]) => {
-  try {
-    setIsDiversifying(true);
-    console.log('Diversifying recommendations with Python engine...');
+  const collectInteractionHistory = (): Array<{entity: any, liked: boolean, timestamp?: string}> => {
+    const interactions = [];
     
-    const response = await fetch('/api/diversify', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        entities: entities,
-        userPreferences: userPrefs,
-        options: {
-          nTotal: 8,
-          nHighAffinity: 3,
-          lambdaParam: 0.7
-        }
-      }),
+    // Get liked entities from localStorage
+    const likedIds = new Set(JSON.parse(localStorage.getItem('liked-entities') || '[]'));
+    
+    // Get full API responses (contains entity details)
+    const fullApiData = JSON.parse(localStorage.getItem('full-api-responses') || '[]');
+    
+    // Get user affinity vector for additional context
+    const affinityData = JSON.parse(localStorage.getItem('user-affinity') || '{}');
+    
+    // Create interactions from liked entities
+    fullApiData.forEach(entity => {
+      if (entity.entity_id) {
+        interactions.push({
+          entity: entity,
+          liked: likedIds.has(entity.entity_id),
+          timestamp: new Date().toISOString(), // You might want to store actual timestamps
+          affinity: affinityData[entity.entity_id] || 0
+        });
+      }
     });
+    
+    // Add conversation-based implicit interactions
+    const conversationHistory = JSON.parse(localStorage.getItem('conversation-history') || '[]');
+    const mentionedEntities = extractEntitiesFromConversation(conversationHistory);
+    
+    mentionedEntities.forEach(entityName => {
+      // Find matching entity in API data
+      const matchedEntity = fullApiData.find(e => 
+        e.name.toLowerCase().includes(entityName.toLowerCase())
+      );
+      if (matchedEntity && !interactions.find(i => i.entity.entity_id === matchedEntity.entity_id)) {
+        interactions.push({
+          entity: matchedEntity,
+          liked: true, // Assume mentioned entities are liked
+          timestamp: new Date().toISOString()
+        });
+      }
+    });
+    
+    return interactions;
+  };
 
-    if (!response.ok) {
-      throw new Error(`Diversification failed: ${response.statusText}`);
+  // to extract entity names from conversation
+  const extractEntitiesFromConversation = (history: Array<{role: string, content: string}>): string[] => {
+    const entityNames = [];
+    const userMessages = history.filter(h => h.role === 'user');
+    
+    userMessages.forEach(msg => {
+      // Simple extraction - you could make this more sophisticated
+      const words = msg.content.split(' ');
+      words.forEach(word => {
+        if (word.length > 3 && /^[A-Z]/.test(word)) {
+          entityNames.push(word);
+        }
+      });
+    });
+    
+    return [...new Set(entityNames)]; // Remove duplicates
+  };
+
+  const diversifyRecommendations = async (entities: any[], userPrefs: string[]) => {
+    try {
+      setIsDiversifying(true);
+      console.log('Diversifying recommendations with interaction history...');
+      
+      // Collect interaction history
+      const interactions = collectInteractionHistory();
+      console.log('Collected interactions:', interactions.length);
+      
+      const response = await fetch('/api/diversify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          entities: entities,
+          userPreferences: userPrefs,
+          interactions: interactions, // ADD THIS LINE
+          options: {
+            nTotal: 8,
+            nHighAffinity: 3,
+            lambdaParam: 0.7
+          }
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Diversification failed: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      console.log('Diversification result:', result);
+
+      if (result.success) {
+        return result.data.diversified_recommendations;
+      } else {
+        throw new Error(result.error || 'Unknown diversification error');
+      }
+    } catch (error) {
+      console.error('Diversification error:', error);
+      return entities;
+    } finally {
+      setIsDiversifying(false);
     }
-
-    const result = await response.json();
-    console.log('Diversification result:', result);
-
-    if (result.success) {
-      return result.data.diversified_recommendations;
-    } else {
-      throw new Error(result.error || 'Unknown diversification error');
-    }
-  } catch (error) {
-    console.error('Diversification error:', error);
-    return entities; // Fallback to original entities
-  } finally {
-    setIsDiversifying(false);
-  }
-};
+  };
 
   const formatResults = (entities: any[]) => {
-  return entities.map(entity => {
-    const city = entity.properties?.geocode?.city;
-    const categoryTag = entity.tags?.find(t => t.type.includes('category'))?.name;
-    const displayType = categoryTag || city || 'Unknown';
+    return entities.map(entity => {
+      const city = entity.properties?.geocode?.city;
+      const categoryTag = entity.tags?.find(t => t.type.includes('category'))?.name;
+      const displayType = categoryTag || city || 'Unknown';
 
-    const rating = entity.properties?.business_rating || 0;
-    const fullStars = Math.floor(rating);
-    const halfStar = rating - fullStars >= 0.5;
-    const stars = '★'.repeat(fullStars) + (halfStar ? '½' : '');
+      const rating = entity.properties?.business_rating || 0;
+      const fullStars = Math.floor(rating);
+      const halfStar = rating - fullStars >= 0.5;
+      const stars = '★'.repeat(fullStars) + (halfStar ? '½' : '');
 
-    const imageUrl =
-      entity.images?.[0]?.url ||
-      entity.properties?.images?.[0]?.url ||
-      entity.properties?.images?.find(img => img.type === "urn:image:place:unknown")?.url ||
-      null;
+      const imageUrl =
+        entity.images?.[0]?.url ||
+        entity.properties?.images?.[0]?.url ||
+        entity.properties?.images?.find(img => img.type === "urn:image:place:unknown")?.url ||
+        null;
 
-    const distanceMiles = entity.query?.distance
-      ? (entity.query.distance / 1609.34).toFixed(1) + ' mi'
-      : null;
+      const distanceMiles = entity.query?.distance
+        ? (entity.query.distance / 1609.34).toFixed(1) + ' mi'
+        : null;
 
-    return {
-      name:        entity.name,
-      entityId:    entity.entity_id,
-      type:        displayType,
-      ratingStars: stars,
-      image:       imageUrl,
-      emoji:       imageUrl ? null : '🌟',
-      description: entity.properties?.description,
-      address:     entity.properties?.address,
-      distance:    distanceMiles,
-      affinity:    entity.query?.affinity
-        ? Math.round(entity.query.affinity * 100) + '%'
-        : '—',
-    };
-  });
-};
-
-
+      return {
+        name:        entity.name,
+        entityId:    entity.entity_id,
+        type:        displayType,
+        ratingStars: stars,
+        image:       imageUrl,
+        emoji:       imageUrl ? null : '🌟',
+        description: entity.properties?.description,
+        address:     entity.properties?.address,
+        distance:    distanceMiles,
+        affinity:    entity.query?.affinity
+          ? Math.round(entity.query.affinity * 100) + '%'
+          : '—',
+      };
+    });
+  };
   
   const handleQuery = async (
   query: string,
@@ -1481,46 +1565,43 @@ Instructions:
   </div>
               {/* Quick Prompt Suggestions */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                  {quickPrompts.map((s, idx) => {
-                  const resolvedPrompt = typeof s.prompt === 'function' ? s.prompt(userProfile) : s.prompt;
+  {quickPrompts.map((s, idx) => {
+    const resolvedPrompt = typeof s.prompt === 'function' ? s.prompt(userProfile) : s.prompt;
+    const isLoading = quickPromptLoading === resolvedPrompt;
 
-                  return (
-                    <button
-                      key={idx}
-                      onClick={async () => {
-                        setQuickPromptLoading(resolvedPrompt);
-                        setUserInput(resolvedPrompt);
-                        
-                        try {
-                          if (s.mood === 'nostalgic') {
-                            await loadNostalgic();
-                          } else {
-                            await handleQuery(resolvedPrompt, s.mood, s.intent);
-                          }
-                        } finally {
-                          setQuickPromptLoading(null);
-                        }
-                      }}
-                      disabled={quickPromptLoading === resolvedPrompt}
-                      className={`bg-gradient-to-r ${s.color} rounded-2xl p-6 text-white hover:scale-105 transition-all duration-200 relative ${
-                        quickPromptLoading === resolvedPrompt ? 'opacity-75' : ''
-                      }`}
-                    >
-                      {quickPromptLoading === resolvedPrompt && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded-2xl">
-                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
-                        </div>
-                      )}
-                      <div className={`text-2xl mb-2 ${quickPromptLoading === resolvedPrompt ? 'opacity-50' : ''}`}>
-                        {s.icon}
-                      </div>
-                      <p className={`font-medium ${quickPromptLoading === resolvedPrompt ? 'opacity-50' : ''}`}>
-                        {resolvedPrompt}
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
+    return (
+      <button
+        key={idx}
+        onClick={async () => {
+          setQuickPromptLoading(resolvedPrompt);
+          setUserInput(resolvedPrompt);
+
+          try {
+            if (s.mood === 'nostalgic') {
+              await loadNostalgic();
+            } else {
+              await handleQuery(resolvedPrompt, s.mood, s.intent);
+            }
+          } finally {
+            setQuickPromptLoading(null);
+          }
+        }}
+        disabled={isLoading}
+        className={`
+          w-full bg-gradient-to-r ${s.color}
+          rounded-2xl px-6 py-6 text-white hover:scale-105 transition-all duration-200
+          flex flex-col items-center justify-center
+          min-h-[140px] text-center
+          ${isLoading ? 'opacity-75 cursor-not-allowed' : ''}
+        `}
+      >
+        <div className="text-2xl mb-2">{s.icon}</div>
+        <p className="font-medium text-base md:text-lg leading-snug">{resolvedPrompt}</p>
+      </button>
+    );
+  })}
+</div>
+
 
               {/* Custom Input */}
               <div className="flex space-x-2">
@@ -1532,11 +1613,24 @@ Instructions:
                   className="flex-1 bg-white/10 border border-white/20 rounded-2xl px-6 py-4 text-white placeholder-purple-300 focus:outline-none focus:border-white/40"
                 />
                 <button
-                  onClick={() => handleQuery(userInput)}
-                  className="bg-gradient-to-r from-orange-500 to-pink-500 text-white px-6 py-4 rounded-2xl hover:scale-105 transition-transform duration-200 font-semibold"
+                  onClick={() => {
+                    setIsLoading(true);
+                    handleQuery(userInput).finally(() => setIsLoading(false));
+                  }}
+                  disabled={isLoading}
+                  className="relative bg-gradient-to-r from-orange-500 to-pink-500 text-white px-6 py-4 rounded-2xl hover:scale-105 transition-transform duration-200 font-semibold disabled:opacity-75"
                 >
-                  Discover
+                  {isLoading ? (
+                    <div className="flex items-center space-x-1">
+                      <div className="w-2 h-2 bg-white rounded-full animate-bounce"></div>
+                      <div className="w-2 h-2 bg-white rounded-full animate-bounce delay-100"></div>
+                      <div className="w-2 h-2 bg-white rounded-full animate-bounce delay-200"></div>
+                    </div>
+                  ) : (
+                    'Discover'
+                  )}
                 </button>
+                
                 <button
                   onClick={() => handleChat(userInput)}
                   className="bg-gradient-to-r from-purple-600 to-indigo-500 text-white px-6 py-4 rounded-2xl hover:scale-105 transition-transform duration-200 font-semibold"

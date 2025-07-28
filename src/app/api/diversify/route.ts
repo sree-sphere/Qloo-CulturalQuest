@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { NextRequest, NextResponse } from 'next/server';
 import { spawn } from 'child_process';
 import path from 'path';
@@ -5,7 +6,7 @@ import fs from 'fs/promises';
 
 export async function POST(request: NextRequest) {
   try {
-    const { entities, userPreferences, options = {} } = await request.json();
+    const { entities, userPreferences, interactions = [], options = {} } = await request.json();
     
     // Validate input
     if (!entities || !Array.isArray(entities) || entities.length === 0) {
@@ -24,18 +25,19 @@ export async function POST(request: NextRequest) {
     const outputFile = path.join(tempDir, `output_${Date.now()}.json`);
     
     // Write entities to temporary file
-    await fs.writeFile(inputFile, JSON.stringify({ entities }));
+    await fs.writeFile(inputFile, JSON.stringify({ entities, interactions }));
     
-    // Prepare Python script arguments
-    const pythonScript = path.join(process.cwd(), 'smart_diversification.py');
+    // python script arguments
+    const pythonScript = path.join(process.cwd(), 'diversification_engine.py');
     const args = [
-      pythonScript,
-      '--input', inputFile,
-      '--output', outputFile,
-      '--preferences', JSON.stringify(userPreferences),
-      '--n_total', (options.nTotal || 8).toString(),
-      '--n_high_affinity', (options.nHighAffinity || 3).toString(),
-      '--lambda_param', (options.lambdaParam || 0.7).toString()
+        pythonScript,
+        '--input', inputFile,
+        '--output', outputFile,
+        '--preferences', JSON.stringify(userPreferences),
+        '--interactions', JSON.stringify(interactions),
+        '--n_total', (options.nTotal || 8).toString(),
+        '--n_high_affinity', (options.nHighAffinity || 3).toString(),
+        '--lambda_param', (options.lambdaParam || 0.7).toString()
     ];
     
     // Execute Python script
