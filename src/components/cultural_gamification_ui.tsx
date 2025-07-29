@@ -118,8 +118,8 @@ const calculateSimilarityScore = (entity1: any, entity2: any): number => {
     const dist2 = parseFloat(entity2.distance);
     if (!isNaN(dist1) && !isNaN(dist2)) {
       const distanceDiff = Math.abs(dist1 - dist2);
-      if (distanceDiff < 1) score += 15; // Within 1 mile
-      else if (distanceDiff < 3) score += 10; // Within 3 miles
+      if (distanceDiff < 1) score += 15; // Within n miles
+      else if (distanceDiff < 5) score += 10;
     }
   }
   
@@ -308,6 +308,9 @@ useEffect(() => {
       localStorage.setItem('user-points', JSON.stringify(userPoints));
     }
   }, [userPoints]);
+  const [hasMounted, setHasMounted] = useState(false);
+  useEffect(() => setHasMounted(true), []);
+
   const [userLevel, setUserLevel] = useState(mockUser.level);
   const [showAltSubtitle, setShowAltSubtitle] = useState(false);
   useEffect(() => {
@@ -962,63 +965,63 @@ useEffect(() => {
       setResults(uniqueEntities); // render immediately
       setFormattedRecommendations(formatResults(uniqueEntities));
       if (diversificationEnabled && uniqueEntities.length > 0) {
-  console.log('Starting background diversification...');
-  diversifyRecommendations(uniqueEntities, userPrefs)
-    .then((diversified) => {
-      console.log('Updated results with diversification.');
-      setResults(diversified);
-      setFormattedRecommendations(formatResults(diversified)); // Replace UI view
-    })
-    .catch(() => {
-      console.warn('Diversification failed, retaining original results.');
-    });
-}
+        console.log('Starting background diversification...');
+        diversifyRecommendations(uniqueEntities, userPrefs)
+          .then((diversified) => {
+            console.log('Updated results with diversification.');
+            setResults(diversified);
+            setFormattedRecommendations(formatResults(diversified)); // Replace UI view
+          })
+          .catch(() => {
+            console.warn('Diversification failed, retaining original results.');
+          });
+      }
 
       // SPECIAL “nostalgic” branch: shuffle, cache, format & exit
       if (mood === 'nostalgic') {
-  const likedIds = new Set(JSON.parse(localStorage.getItem('liked-entities') || '[]'));
+        const likedIds = new Set(JSON.parse(localStorage.getItem('liked-entities') || '[]'));
 
-  // 1. Format all entities first
-  const formatted = uniqueEntities.map(entity => {
-    const city = entity.properties?.geocode?.city;
-    const categoryTag = entity.tags?.find(t => t.type.includes('category'))?.name;
-    const displayType = categoryTag || city || 'Unknown';
-    const rating = entity.properties?.business_rating || 0;
-    const fullStars = Math.floor(rating);
-    const halfStar = rating - fullStars >= 0.5;
-    const stars = '★'.repeat(fullStars) + (halfStar ? '½' : '');
-    const imageUrl =
-      entity.images?.[0]?.url ||
-      entity.properties?.images?.[0]?.url ||
-      null;
-    const distanceMiles = entity.query?.distance
-      ? (entity.query.distance / 1609.34).toFixed(1) + ' mi'
-      : null;
+        // 1. Format all entities first
+        const formatted = uniqueEntities.map(entity => {
+          const city = entity.properties?.geocode?.city;
+          const categoryTag = entity.tags?.find(t => t.type.includes('category'))?.name;
+          const displayType = categoryTag || city || 'Unknown';
+          const rating = entity.properties?.business_rating || 0;
+          const fullStars = Math.floor(rating);
+          const halfStar = rating - fullStars >= 0.5;
+          const stars = '★'.repeat(fullStars) + (halfStar ? '½' : '');
+          const imageUrl =
+            entity.images?.[0]?.url ||
+            entity.properties?.images?.[0]?.url ||
+            null;
+          const distanceMiles = entity.query?.distance
+            ? (entity.query.distance / 1609.34).toFixed(1) + ' mi'
+            : null;
 
-    return {
-      name:        entity.name,
-      entityId:    entity.entity_id,
-      type:        displayType,
-      ratingStars: stars,
-      image:       imageUrl,
-      emoji:       imageUrl ? null : '🌟',
-      description: entity.properties?.description,
-      address:     entity.properties?.address,
-      distance:    distanceMiles,
-      affinity:    entity.query?.affinity
-        ? Math.round(entity.query.affinity * 100) + '%'
-        : '—',
-    };
-  });
+          return {
+            name:        entity.name,
+            entityId:    entity.entity_id,
+            type:        displayType,
+            ratingStars: stars,
+            image:       imageUrl,
+            emoji:       imageUrl ? null : '🌟',
+            description: entity.properties?.description,
+            address:     entity.properties?.address,
+            distance:    distanceMiles,
+            affinity:    entity.query?.affinity
+              ? Math.round(entity.query.affinity * 100) + '%'
+              : '—',
+          };
+        });
 
-  // 2. Use the helper function to reorder
-  const reordered = reorderNostalgicRecommendations(formatted, likedIds, userAffinityVector);
-  
-  const contextCacheKey = `recs-${mood}`;
-  localStorage.setItem(contextCacheKey, JSON.stringify(formatted));
-  setRecommendations(reordered);
-  return;
-}
+        // 2. Use the helper function to reorder
+        const reordered = reorderNostalgicRecommendations(formatted, likedIds, userAffinityVector);
+        
+        const contextCacheKey = `recs-${mood}`;
+        localStorage.setItem(contextCacheKey, JSON.stringify(formatted));
+        setRecommendations(reordered);
+        return;
+      }
       
       // “Plan my weekend in ___ chat branch
       if (intent === 'discover' && mood === 'social') {
@@ -1115,6 +1118,7 @@ useEffect(() => {
     if (cached.length && cached[0]?.entityId) {
       const currentLikes = new Set(JSON.parse(localStorage.getItem('liked-entities') || '[]'));
       const reordered = reorderNostalgicRecommendations(cached, currentLikes, userAffinityVector);
+      setCurrentMode('nostalgic');
       setRecommendations(reordered);
       // Update cache with new order
       localStorage.setItem(CACHE_KEY, JSON.stringify(reordered));
@@ -1730,7 +1734,11 @@ Instructions:
             <div className="flex items-center space-x-6">
               <div className="flex items-center space-x-2 bg-white/10 backdrop-blur-sm rounded-full px-4 py-2">
                 <Zap className="w-4 h-4 text-yellow-400" />
-                <span className="text-white font-semibold">{userPoints.toLocaleString()}</span>
+                {hasMounted && (
+                  <span className="text-white font-semibold">
+                    {userPoints.toLocaleString()}
+                  </span>
+                )}
               </div>
                             <div className="flex items-center space-x-2 bg-white/10 backdrop-blur-sm rounded-full px-4 py-2">
                 <Trophy className="w-4 h-4 text-yellow-400" />
@@ -2482,7 +2490,9 @@ Instructions:
               <Image
                 src="/qloo_assets/images/prize.png"
                 alt="Prize character"
-                className="hidden lg:block absolute bottom-0 right-0 w-80 object-contain z-10 pointer-events-none"
+                width={360}
+                height={360}
+                className="hidden lg:block absolute bottom-0 right-0 object-contain z-10 pointer-events-none"
               />
 
               {/* Spin Wheel Section */}
