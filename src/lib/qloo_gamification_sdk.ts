@@ -3,6 +3,7 @@
 // Built on top of Qloo TypeScript SDK
 
 import { Qloo } from '@devma/qloo';
+import axios from 'axios';
 const qloo = new Qloo({
   apiKey: process.env.NEXT_PUBLIC_QLOO_API_KEY || ''
 });
@@ -77,6 +78,7 @@ interface ContextualPrompt {
 export class QlooCulturalGamification {
   private qloo: Qloo;
   // private userProfiles: Map<string, UserProfile> = new Map();
+  private apiKey: string;
   private userProfiles = new Map<string, UserProfile>();
   private userProgress: Map<string, UserProgress> = new Map();
 
@@ -131,8 +133,9 @@ export class QlooCulturalGamification {
     this.userProfiles.set(userProfile.userId, userProfile);
   }
 
-  constructor(qloo: Qloo) {
+  constructor(qloo: Qloo, apiKey: string) {
     this.qloo = qloo;
+    this.apiKey = apiKey;
   }
 
   // User Profile Management
@@ -159,8 +162,27 @@ export class QlooCulturalGamification {
     if (!profile) throw new Error('User profile not found');
 
     const baseSignals = await this.buildContextualSignals(profile, prompt);
-    const filters = this.buildContextualFilters(prompt, location || profile.location.current);
+    const filters = location ? this.buildContextualFilters(prompt, location) : {};
 
+    // direct‐search override
+   if (prompt.intent === 'search') {
+       // raw HTTP fallback to Qloo /search endpoint
+       const { data } = await axios.get(
+         'https://hackathon.api.qloo.com/search',
+         {
+           params: { query: prompt.context, types: 'urn:entity:place' },
+           headers: {
+             accept: 'application/json',
+             'x-api-key': this.apiKey
+           }
+         }
+       );
+       return {
+         entities: data.results || [],
+         mood: prompt.mood,
+         explanation: `Search results for “${prompt.context}”`
+       };
+     }
     switch (prompt.mood) {
       case 'nostalgic':
         return await this.getNostalgicRecommendations(baseSignals, filters, profile);
@@ -603,12 +625,12 @@ export class QlooCulturalGamification {
     }
   }
 }
-// Usage Example
-export class CulturalAppExample {
+
+export class CulturalApp {
   private gamification: QlooCulturalGamification;
 
-  constructor(qloo: Qloo) {
-    this.gamification = new QlooCulturalGamification(qloo);
+  constructor(qloo: Qloo, apiKey: string) {
+    this.gamification = new QlooCulturalGamification(qloo, apiKey);
   }
 
   async initializeUser(profile: UserProfile) {

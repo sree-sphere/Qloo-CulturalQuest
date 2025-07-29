@@ -2,7 +2,7 @@
 
 A gamified cultural exploration platform that helps new migrants and cultural enthusiasts discover authentic local experiences through AI-powered recommendations, interactive chat, and immersive rewards system.
 
-CulturalQuest blends Qloo’s Taste AI™ with OpenAI’s ChatGPT and ElevenLabs TTS to redefine personalized discovery. CulturalQuest uses advanced multi-stage recommendation‑system techniques — semantic embeddings, contextual bandit learning (a form of online reinforcement learning), and MMR-based diversification — to balance affinity and novelty. The experience is wrapped in a points-and-badges UX to drive discovery through exploration. 
+CulturalQuest blends Qloo’s Taste AI™ with OpenAI’s ChatGPT and ElevenLabs TTS to redefine personalized discovery. CulturalQuest uses advanced multi-stage recommendation‑system techniques — semantic embeddings, contextual bandit learning (a form of online reinforcement learning), and MMR-based diversification — to balance affinity and novelty. The experience is wrapped in a points-and-badges UX to drive discovery through exploration.
 
 ---
 
@@ -19,15 +19,12 @@ Today, Austin is home to **≈296,000 foreign-born residents** (14% of the city'
 ### Character Assets
 
 - The **Sahayak** (meaning “helper”) assistant character draws inspiration from the anime/J‑drama **_Trillion Game_**, where the AI named “Turinin” guides customers toward their best-fit choices through intuitive intelligence and contextual suggestions.
-- **Images:** generated using my profile image as reference, with FLUX.1‑Kontext‑Dev space on Hugging Face:  
-  https://huggingface.co/spaces/black-forest-labs/FLUX.1-Kontext-Dev  
-- **Videos:** rendered via ChatGPT’s video API.
 
 ---
 
 ## ✨ Features
 
-- **Recommendation System Architecture: Hybrid Multi-Stage Pipeline**  
+- **Recommendation System Architecture: Hybrid Multi-Stage Pipeline**
   - **Stage 1**: Semantic Retrieval via Embedding
     1. Computes sentence-level embeddings for all available entities using SentenceTransformer (`all-MiniLM-L6-v2`) with cosine similarity for initial selection
     2. Fast re-ranking with cache & streaming support
@@ -47,11 +44,21 @@ Today, Austin is home to **≈296,000 foreign-born residents** (14% of the city'
   - `chat/route.ts` proxy to ChatGPT, enriched with:  
     - Full API context (entities’ descriptions, hours, amenities)  
     - User profile metadata (demographics, preferences, streaks)  
-  - Streaming responses with live video/photo backgrounds  
+  - Streaming responses with live video/photo backgrounds
+
+- **Assets**
+  - **Images:** generated using my profile image as reference, with FLUX.1‑Kontext‑Dev space on Hugging Face:  
+    https://huggingface.co/spaces/black-forest-labs/FLUX.1-Kontext-Dev  
+  - **Videos:** rendered via ChatGPT’s video API.
+
+- **Photo Upload Validation**  
+  - Users can upload or capture location-tagged images
+  - `/api/extract-gps` routes EXIF extraction via Python `extract_gps.py`  
+  - If image was taken within 20 km (20 for demo) of target, user receives points and may earn badges  
 
 - **Text‑to‑Speech Playback**  
   - `/api/tts` (`tts/route.ts`) calls ElevenLabs to generate audio blobs  
-  - Synchronized video overlays and fallback to static imagery  
+  - Synchronized video overlays and fallback to static imagery
 
 - **Modes**  
   - “Nostalgic” (similarity-based reordering) mode caches & reorders recommendations by user‑liked similarity scores

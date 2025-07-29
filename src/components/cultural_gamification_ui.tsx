@@ -6,12 +6,12 @@ import Image from 'next/image';
 
 // Qloo & SDK imports
 import { Qloo } from '@devma/qloo';
-import { QlooCulturalGamification, CulturalAppExample } from '../lib/qloo_gamification_sdk';
+import { QlooCulturalGamification, CulturalApp } from '../lib/qloo_gamification_sdk';
 
 // Qloo and gamification SDK
 const qloo = new Qloo({apiKey: process.env.NEXT_PUBLIC_QLOO_API_KEY || ''});
-const gamification = new QlooCulturalGamification(qloo);
-const app = new CulturalAppExample(qloo);
+const gamification = new QlooCulturalGamification(qloo, process.env.NEXT_PUBLIC_QLOO_API_KEY || '');
+const app = new CulturalApp(qloo, process.env.NEXT_PUBLIC_QLOO_API_KEY || '');
 
 // Initial mock user data
 const mockUser = {
@@ -228,6 +228,12 @@ useEffect(() => {
   }
 });
 
+  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<'idle' | 'validating' | 'success' | 'rejected'>('idle');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+
   const [showSpinWheel, setShowSpinWheel] = useState(false);
   const [spinResult, setSpinResult] = useState(null);
   const [isSpinning, setIsSpinning] = useState(false);
@@ -411,6 +417,102 @@ useEffect(() => {
       setError('Failed to load details. Please try again.');
     }
   };
+
+  // Distance calculation function (Haversine formula)
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371; // Earth's radius in kilometers
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = 
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+      Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  };
+  
+  // Handle image upload and GPS validation
+  const handleImageUpload = async (file: File) => {
+    setIsUploading(true);
+    setUploadStatus('validating');
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const response = await fetch('/api/extract-gps', {
+        method: 'POST',
+        body: formData,
+      });
+      
+      const result = await response.json();
+      
+      if (response.ok && result.latitude && result.longitude) {
+        // Calculate distance from entity location
+        const distance = calculateDistance(
+          entityDetails.location.lat,
+          entityDetails.location.lon,
+          result.latitude,
+          result.longitude
+        );
+        
+        if (distance <= 20) {
+          // Image is within 20km - accept it
+          const imageUrl = URL.createObjectURL(file);
+          setUploadedImage(imageUrl);
+          setUploadStatus('success');
+          
+          // Store in cache with entity ID
+          const cacheKey = `uploaded-image-${entityDetails.entityId}`;
+          localStorage.setItem(cacheKey, imageUrl);
+          
+          setTimeout(() => setUploadStatus('idle'), 2000);
+        } else {
+          // Image is too far - reject it
+          setUploadStatus('rejected');
+          setTimeout(() => {
+            setUploadStatus('idle');
+            setUploadedImage(null);
+          }, 3000);
+        }
+      } else {
+        // No GPS data found
+        setUploadStatus('rejected');
+        setTimeout(() => setUploadStatus('idle'), 3000);
+      }
+    } catch (error) {
+      console.error('Upload error:', error);
+      setUploadStatus('rejected');
+      setTimeout(() => setUploadStatus('idle'), 3000);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // File input handlers
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      handleImageUpload(file);
+    }
+  };
+
+  const handleCameraCapture = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      handleImageUpload(file);
+    }
+  };
+
+  // Check for cached image on component mount
+  useEffect(() => {
+    if (!entityDetails?.entityId) return;
+    const cacheKey = `uploaded-image-${entityDetails.entityId}`;
+    const cachedImage = localStorage.getItem(cacheKey);
+    if (cachedImage) {
+      setUploadedImage(cachedImage);
+    }
+  }, [entityDetails?.entityId]);
   
   const quickPrompts = [
       {
@@ -506,7 +608,7 @@ useEffect(() => {
         interactions.push({
           entity: entity,
           liked: likedIds.has(entity.entity_id),
-          timestamp: new Date().toISOString(), // You might want to store actual timestamps
+          timestamp: new Date().toISOString(),
           affinity: affinityData[entity.entity_id] || 0
         });
       }
@@ -539,7 +641,6 @@ useEffect(() => {
     const userMessages = history.filter(h => h.role === 'user');
     
     userMessages.forEach(msg => {
-      // Simple extraction - you could make this more sophisticated
       const words = msg.content.split(' ');
       words.forEach(word => {
         if (word.length > 3 && /^[A-Z]/.test(word)) {
@@ -638,7 +739,8 @@ useEffect(() => {
   const handleQuery = async (
   query: string,
   forcedMood?: 'nostalgic' | 'adventurous' | 'relaxed',
-  forcedIntent?: string
+  forcedIntent?: string,
+  skipLocationFilter: boolean = false
 ) => {
     if (!query.trim()) {
       console.log('No query entered');
@@ -653,7 +755,7 @@ useEffect(() => {
     : query.toLowerCase().includes('adventurous')
     ? 'adventurous'
     : 'relaxed';
-    const intent = forcedIntent || 'discover';
+    const intent = forcedIntent || 'search';
     setCurrentMode(mood);
 
     const prompt = { mood, intent, context: query } as const;
@@ -666,10 +768,11 @@ useEffect(() => {
         await gamification.createUserProfile(mockUser);
       }
 
+      const locationArg = skipLocationFilter ? undefined : userProfile.location.current;
       const recPayload = await gamification.getContextualRecommendations(
         userProfile.userId,
         prompt,
-        userProfile.location.current
+        locationArg
       );
       console.log('API response:', recPayload);
       localStorage.setItem('full-api-responses', JSON.stringify(recPayload.entities || []));
@@ -763,39 +866,39 @@ useEffect(() => {
       
       // “Plan my weekend in ___ chat branch
       if (intent === 'discover' && mood === 'social') {
-  // 1) filter for weekend‑open & vegetarian
-  const weekendOpen = uniqueEntities.filter(e => {
-    const hrs = e.properties?.hours || {};
-    const saturdayOpen = hrs.Saturday && hrs.Saturday.length > 0;
-    const sundayOpen = hrs.Sunday && hrs.Sunday.length > 0;
-    return saturdayOpen && sundayOpen;
-  });
-  
-  const vegOnly = weekendOpen.filter(e =>
-    e.tags?.some(t => /vegetarian|vegan/i.test(t.name)) ||
-    e.properties?.description?.toLowerCase().includes('vegetarian')
-  );
-  
-  // 2) take top 3
-  const top3 = vegOnly.slice(0, 3);
-  
-  // 3) Format hours properly
-  const summary = top3.map(e => {
-    const satHours = e.properties.hours?.Saturday?.[0];
-    const sunHours = e.properties.hours?.Sunday?.[0];
+        // 1) filter for weekend‑open & vegetarian
+        const weekendOpen = uniqueEntities.filter(e => {
+          const hrs = e.properties?.hours || {};
+          const saturdayOpen = hrs.Saturday && hrs.Saturday.length > 0;
+          const sundayOpen = hrs.Sunday && hrs.Sunday.length > 0;
+          return saturdayOpen && sundayOpen;
+        });
+        
+        const vegOnly = weekendOpen.filter(e =>
+          e.tags?.some(t => /vegetarian|vegan/i.test(t.name)) ||
+          e.properties?.description?.toLowerCase().includes('vegetarian')
+        );
+        
+        // 2) take top 3
+        const top3 = vegOnly.slice(0, 3);
+        
+        // 3) Format hours properly
+        const summary = top3.map(e => {
+          const satHours = e.properties.hours?.Saturday?.[0];
+          const sunHours = e.properties.hours?.Sunday?.[0];
     
-    return `
-    - ${e.name}
-      • ${e.properties?.address || 'Address not available'}
-      • Hours: Sat ${formatTime(satHours?.opens)}–${formatTime(satHours?.closes)}, Sun ${formatTime(sunHours?.opens)}–${formatTime(sunHours?.closes)}
-      • ${e.properties?.description || 'No description available'}
-    `;
-      }).join('\n');
-      
-      // 4) invoke chat
-      await handleChat(`Plan my weekend in ${userProfile.location.current}. Here are some vegetarian-friendly options that are open on weekends:${summary}`);
-      return;
-    }
+        return `
+        - ${e.name}
+          • ${e.properties?.address || 'Address not available'}
+          • Hours: Sat ${formatTime(satHours?.opens)}–${formatTime(satHours?.closes)}, Sun ${formatTime(sunHours?.opens)}–${formatTime(sunHours?.closes)}
+          • ${e.properties?.description || 'No description available'}
+        `;
+          }).join('\n');
+          
+          // 4) invoke chat
+          await handleChat(`Plan my weekend in ${userProfile.location.current}. Here are some vegetarian-friendly options that are open on weekends:${summary}`);
+          return;
+        }
       
       // Default “discover” / other moods → map & render cards
       const formattedRecommendations = uniqueEntities.map(entity => {
@@ -817,7 +920,7 @@ useEffect(() => {
           entity.properties?.images?.find(img => img.type === "urn:image:place:unknown")?.url ||
           null;
 
-        // distance in miles (if you want)
+        // distance in miles
         const distanceMiles = entity.query?.distance
           ? (entity.query.distance / 1609.34).toFixed(1) + ' mi'
           : null;
@@ -1280,170 +1383,170 @@ Instructions:
           <form
             onClick={e => e.stopPropagation()}
             onSubmit={e => {
-        e.preventDefault();
-        localStorage.setItem('qloo-user-profile', JSON.stringify(profileForm));
-        const updated = {
-          ...userProfile,
-          ...profileForm,
-          location: { ...userProfile.location, current: profileForm.location.current },
-          preferences: { ...userProfile.preferences, ...profileForm.preferences }
-        };
-        gamification.registerUserProfile(updated);
-        setUserProfile(prev => ({ ...prev, ...profileForm }));
-        setShowProfileModal(false);
-      }}
+              e.preventDefault();
+              localStorage.setItem('qloo-user-profile', JSON.stringify(profileForm));
+              const updated = {
+                ...userProfile,
+                ...profileForm,
+                location: { ...userProfile.location, current: profileForm.location.current },
+                preferences: { ...userProfile.preferences, ...profileForm.preferences }
+              };
+              gamification.registerUserProfile(updated);
+              setUserProfile(prev => ({ ...prev, ...profileForm }));
+              setShowProfileModal(false);
+            }}
             className="bg-white/10 backdrop-blur-md rounded-2xl p-8 w-full max-w-lg space-y-6 transform scale-95 opacity-0 animate-modal-in"
           >
-      <h2 className="text-2xl font-bold">Edit Your Profile</h2>
+            <h2 className="text-2xl font-bold">Edit Your Profile</h2>
 
-      {/* Name */}
-      <div>
-        <label className="block text-sm font-medium mb-1">Name</label>
-        <input
-          type="text"
-          value={profileForm.name}
-          onChange={e => setProfileForm(f => ({ ...f, name: e.target.value }))}
-          className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-indigo-300"
-        />
-      </div>
+            {/* Name */}
+            <div>
+              <label className="block text-sm font-medium mb-1">Name</label>
+              <input
+                type="text"
+                value={profileForm.name}
+                onChange={e => setProfileForm(f => ({ ...f, name: e.target.value }))}
+                className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-indigo-300"
+              />
+            </div>
 
-      {/* Age & Gender */}
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-sm font-medium mb-1">Age</label>
-          <select
-            value={profileForm.demographics.age}
-            onChange={e => setProfileForm(f => ({
-              ...f,
-              demographics: { ...f.demographics, age: e.target.value }
-            }))}
-            className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-indigo-300"
-          >
-            <option value="35_and_younger">35 and younger</option>
-            <option value="36_to_55">36 to 55</option>
-            <option value="55_and_older">55 and older</option>
-          </select>
+            {/* Age & Gender */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Age</label>
+                <select
+                  value={profileForm.demographics.age}
+                  onChange={e => setProfileForm(f => ({
+                    ...f,
+                    demographics: { ...f.demographics, age: e.target.value }
+                  }))}
+                  className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-indigo-300"
+                >
+                  <option value="35_and_younger">35 and younger</option>
+                  <option value="36_to_55">36 to 55</option>
+                  <option value="55_and_older">55 and older</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Gender</label>
+                <select
+                  value={profileForm.demographics.gender}
+                  onChange={e => setProfileForm(f => ({
+                    ...f,
+                    demographics: { ...f.demographics, gender: e.target.value }
+                  }))}
+                  className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-indigo-300"
+                >
+                  <option value="female">Female</option>
+                  <option value="male">Male</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Ethnicity / Cultural Background */}
+            <div>
+              <label className="block text-sm font-medium mb-1">Cultural Background</label>
+              <select
+                value={profileForm.demographics.ethnicity}
+                onChange={e =>
+                  setProfileForm(f => ({
+                    ...f,
+                    demographics: { ...f.demographics, ethnicity: e.target.value }
+                  }))
+                }
+                className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-indigo-300"
+              >
+                <option value="">Select one...</option>
+                <option value="Hispanic">Hispanic / Latino</option>
+                <option value="Chinese">Chinese</option>
+                <option value="Japanese">Japanese</option>
+                <option value="Korean">Korean</option>
+                <option value="Indian">Indian</option>
+                <option value="Spanish">Spanish</option>
+                <option value="French">French</option>
+                <option value="English">English</option>
+                <option value="Other">Other / Prefer not to say</option>
+              </select>
+            </div>
+
+            {/* Location */}
+            <div>
+              <label className="block text-sm font-medium mb-1">Current Location</label>
+              <input
+                type="text"
+                value={profileForm.location.current}
+                onChange={e => setProfileForm(f => ({
+                  ...f,
+                  location: { current: e.target.value }
+                }))}
+                className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-indigo-300"
+                placeholder="e.g. Austin, TX"
+              />
+            </div>
+
+            {/* Multi‑select tags: cuisines, culturalInterests, nostalgicPeriods */}
+            {[
+              { key: 'cuisines', label: 'Favorite Cuisines' },
+              { key: 'culturalInterests', label: 'Cultural Interests' },
+              { key: 'nostalgicPeriods', label: 'Nostalgic Periods' }
+            ].map(({ key, label }) => (
+              <div key={key}>
+                <label className="block text-sm font-medium mb-1">{label}</label>
+                <input
+                  type="text"
+                  value={(profileForm.preferences as any)[key].join(', ')}
+                  onChange={e => {
+                    const arr = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
+                    setProfileForm(f => ({
+                      ...f,
+                      preferences: { ...f.preferences, [key]: arr }
+                    }));
+                  }}
+                  className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-indigo-300"
+                  placeholder={`e.g. Indian, Thai, Italian`}
+                />
+                <p className="text-xs text-gray-500 mt-1">Comma‑separated</p>
+              </div>
+            ))}
+
+            {/* Travel Style */}
+            <div>
+              <label className="block text-sm font-medium mb-1">Travel Style</label>
+              <select
+                value={profileForm.preferences.travelStyle}
+                onChange={e => setProfileForm(f => ({
+                  ...f,
+                  preferences: { ...f.preferences, travelStyle: e.target.value }
+                }))}
+                className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-indigo-300"
+              >
+                <option value="budget">Budget</option>
+                <option value="luxury">Luxury</option>
+                <option value="authentic">Authentic</option>
+                <option value="modern">Modern</option>
+              </select>
+            </div>
+
+            {/* Buttons */}
+            <div className="flex justify-end space-x-4">
+              <button
+                type="button"
+                onClick={() => setShowProfileModal(false)}
+                className="px-6 py-2 rounded-lg hover:bg-gray-300 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-6 py-2 rounded-lg bg-teal-600 text-white hover:bg-indigo-700 transition"
+              >
+                Save
+              </button>
+            </div>
+          </form>
         </div>
-
-        <div>
-          <label className="block text-sm font-medium mb-1">Gender</label>
-          <select
-            value={profileForm.demographics.gender}
-            onChange={e => setProfileForm(f => ({
-              ...f,
-              demographics: { ...f.demographics, gender: e.target.value }
-            }))}
-            className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-indigo-300"
-          >
-            <option value="female">Female</option>
-            <option value="male">Male</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Ethnicity / Cultural Background */}
-      <div>
-        <label className="block text-sm font-medium mb-1">Cultural Background</label>
-        <select
-          value={profileForm.demographics.ethnicity}
-          onChange={e =>
-            setProfileForm(f => ({
-              ...f,
-              demographics: { ...f.demographics, ethnicity: e.target.value }
-            }))
-          }
-          className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-indigo-300"
-        >
-          <option value="">Select one...</option>
-          <option value="Hispanic">Hispanic / Latino</option>
-          <option value="Chinese">Chinese</option>
-          <option value="Japanese">Japanese</option>
-          <option value="Korean">Korean</option>
-          <option value="Indian">Indian</option>
-          <option value="Spanish">Spanish</option>
-          <option value="French">French</option>
-          <option value="English">English</option>
-          <option value="Other">Other / Prefer not to say</option>
-        </select>
-      </div>
-
-      {/* Location */}
-      <div>
-        <label className="block text-sm font-medium mb-1">Current Location</label>
-        <input
-          type="text"
-          value={profileForm.location.current}
-          onChange={e => setProfileForm(f => ({
-            ...f,
-            location: { current: e.target.value }
-          }))}
-          className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-indigo-300"
-          placeholder="e.g. Austin, TX"
-        />
-      </div>
-
-      {/* Multi‑select tags: cuisines, culturalInterests, nostalgicPeriods */}
-      {[
-        { key: 'cuisines', label: 'Favorite Cuisines' },
-        { key: 'culturalInterests', label: 'Cultural Interests' },
-        { key: 'nostalgicPeriods', label: 'Nostalgic Periods' }
-      ].map(({ key, label }) => (
-        <div key={key}>
-          <label className="block text-sm font-medium mb-1">{label}</label>
-          <input
-            type="text"
-            value={(profileForm.preferences as any)[key].join(', ')}
-            onChange={e => {
-              const arr = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
-              setProfileForm(f => ({
-                ...f,
-                preferences: { ...f.preferences, [key]: arr }
-              }));
-            }}
-            className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-indigo-300"
-            placeholder={`e.g. Indian, Thai, Italian`}
-          />
-          <p className="text-xs text-gray-500 mt-1">Comma‑separated</p>
-        </div>
-      ))}
-
-      {/* Travel Style */}
-      <div>
-        <label className="block text-sm font-medium mb-1">Travel Style</label>
-        <select
-          value={profileForm.preferences.travelStyle}
-          onChange={e => setProfileForm(f => ({
-            ...f,
-            preferences: { ...f.preferences, travelStyle: e.target.value }
-          }))}
-          className="w-full border px-4 py-2 rounded-lg focus:ring-2 focus:ring-indigo-300"
-        >
-          <option value="budget">Budget</option>
-          <option value="luxury">Luxury</option>
-          <option value="authentic">Authentic</option>
-          <option value="modern">Modern</option>
-        </select>
-      </div>
-
-      {/* Buttons */}
-      <div className="flex justify-end space-x-4">
-        <button
-          type="button"
-          onClick={() => setShowProfileModal(false)}
-          className="px-6 py-2 rounded-lg hover:bg-gray-300 transition"
-        >
-          Cancel
-        </button>
-        <button
-          type="submit"
-          className="px-6 py-2 rounded-lg bg-teal-600 text-white hover:bg-indigo-700 transition"
-        >
-          Save
-        </button>
-      </div>
-    </form>
-  </div>
-)}
+      )}
       {/* Header */}
       <div className="bg-black/20 backdrop-blur-sm border-b border-white/10 sticky top-0 z-50">
         <div className="max-w-6xl mx-auto px-4 py-4">
@@ -1470,7 +1573,7 @@ Instructions:
                 <span className="text-white font-semibold">{userPoints.toLocaleString()}</span>
               </div>
                             <div className="flex items-center space-x-2 bg-white/10 backdrop-blur-sm rounded-full px-4 py-2">
-                <Trophy className="w-4 h-4 text-yellow-400" /> {/* Using standard Tailwind class */}
+                <Trophy className="w-4 h-4 text-yellow-400" />
                 <span className="text-white font-semibold">Level {userLevel}</span>
               </div>
             </div>
@@ -1556,52 +1659,51 @@ Instructions:
             <div className="bg-white/10 backdrop-blur-sm rounded-3xl p-6 border border-white/20">
               <h3 className="text-xl font-bold text-white mb-4">What is on your mind today?</h3>
               <div className="flex items-center space-x-2 mb-4">
-    {isDiversifying && (
-      <div className="flex items-center space-x-1 text-blue-600">
-        <div className="animate-spin w-3 h-3 border border-blue-600 border-t-transparent rounded-full"></div>
-        <span className="text-xs">Diversifying...</span>
-      </div>
-    )}
-  </div>
+                {isDiversifying && (
+                  <div className="flex items-center space-x-1 text-blue-600">
+                    <div className="animate-spin w-3 h-3 border border-blue-600 border-t-transparent rounded-full"></div>
+                    <span className="text-xs">Diversifying...</span>
+                  </div>
+                )}
+              </div>
               {/* Quick Prompt Suggestions */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-  {quickPrompts.map((s, idx) => {
-    const resolvedPrompt = typeof s.prompt === 'function' ? s.prompt(userProfile) : s.prompt;
-    const isLoading = quickPromptLoading === resolvedPrompt;
+                  {quickPrompts.map((s, idx) => {
+                    const resolvedPrompt = typeof s.prompt === 'function' ? s.prompt(userProfile) : s.prompt;
+                    const isLoading = quickPromptLoading === resolvedPrompt;
 
-    return (
-      <button
-        key={idx}
-        onClick={async () => {
-          setQuickPromptLoading(resolvedPrompt);
-          setUserInput(resolvedPrompt);
+                    return (
+                      <button
+                        key={idx}
+                        onClick={async () => {
+                          setQuickPromptLoading(resolvedPrompt);
+                          setUserInput(resolvedPrompt);
 
-          try {
-            if (s.mood === 'nostalgic') {
-              await loadNostalgic();
-            } else {
-              await handleQuery(resolvedPrompt, s.mood, s.intent);
-            }
-          } finally {
-            setQuickPromptLoading(null);
-          }
-        }}
-        disabled={isLoading}
-        className={`
-          w-full bg-gradient-to-r ${s.color}
-          rounded-2xl px-6 py-6 text-white hover:scale-105 transition-all duration-200
-          flex flex-col items-center justify-center
-          min-h-[140px] text-center
-          ${isLoading ? 'opacity-75 cursor-not-allowed' : ''}
-        `}
-      >
-        <div className="text-2xl mb-2">{s.icon}</div>
-        <p className="font-medium text-base md:text-lg leading-snug">{resolvedPrompt}</p>
-      </button>
-    );
-  })}
-</div>
-
+                          try {
+                            if (s.mood === 'nostalgic') {
+                              await loadNostalgic();
+                            } else {
+                              await handleQuery(resolvedPrompt, s.mood, s.intent);
+                            }
+                          } finally {
+                            setQuickPromptLoading(null);
+                          }
+                        }}
+                        disabled={isLoading}
+                        className={`
+                          w-full bg-gradient-to-r ${s.color}
+                          rounded-2xl px-6 py-6 text-white hover:scale-105 transition-all duration-200
+                          flex flex-col items-center justify-center
+                          min-h-[140px] text-center
+                          ${isLoading ? 'opacity-75 cursor-not-allowed' : ''}
+                        `}
+                      >
+                        <div className="text-2xl mb-2">{s.icon}</div>
+                        <p className="font-medium text-base md:text-lg leading-snug">{resolvedPrompt}</p>
+                      </button>
+                    );
+                  })}
+                </div>
 
               {/* Custom Input */}
               <div className="flex space-x-2">
@@ -1615,7 +1717,7 @@ Instructions:
                 <button
                   onClick={() => {
                     setIsLoading(true);
-                    handleQuery(userInput).finally(() => setIsLoading(false));
+                    handleQuery(userInput, undefined, undefined, true).finally(() => setIsLoading(false));
                   }}
                   disabled={isLoading}
                   className="relative bg-gradient-to-r from-orange-500 to-pink-500 text-white px-6 py-4 rounded-2xl hover:scale-105 transition-transform duration-200 font-semibold disabled:opacity-75"
@@ -1888,28 +1990,129 @@ Instructions:
                     </div>
 
         {/* Image with Error Handling */}
-        {entityDetails.image && !imageErrors.has(entityDetails.entityId) ? (
-          <div className="relative w-full mb-6 aspect-video rounded-2xl overflow-hidden bg-black">
-          <Image
-            src={entityDetails.image}
-            alt={entityDetails.name}
-            fill
-            className="object-contain"
-            unoptimized
-            onError={() => handleImageError(entityDetails.entityId)}
-          />
-        </div>
-        ) : (
-          <div className="mb-6">
-            <Image
-              src="/qloo_assets/images/image_expanded.jpg"
-              alt={entityDetails.name}
-              width={600}
-              height={300}
-              className="w-full h-64 object-cover rounded-2xl"
-            />
+        <div className="flex flex-col lg:flex-row gap-6 mb-6">
+          {/* Original Image */}
+          <div className="flex-1">
+            {entityDetails.image && !imageErrors.has(entityDetails.entityId) ? (
+              <div className="relative w-full aspect-video rounded-2xl overflow-hidden bg-black">
+                <Image
+                  src={entityDetails.image}
+                  alt={entityDetails.name}
+                  fill
+                  className="object-contain"
+                  unoptimized
+                  onError={() => handleImageError(entityDetails.entityId)}
+                />
+              </div>
+            ) : (
+              <div>
+                <Image
+                  src="/qloo_assets/images/image_expanded.jpg"
+                  alt={entityDetails.name}
+                  width={600}
+                  height={300}
+                  className="w-full h-64 object-cover rounded-2xl"
+                />
+              </div>
+            )}
           </div>
-        )}
+
+          {/* Image Upload */}
+          <div className="flex-1">
+            <div className="relative">
+              {/* Upload Area */}
+              <div className={`
+                relative w-full aspect-video rounded-2xl overflow-hidden border-2 border-dashed transition-all duration-300
+                ${uploadStatus === 'validating' ? 'border-yellow-400 bg-yellow-400/10' : ''}
+                ${uploadStatus === 'success' ? 'border-green-400 bg-green-400/10' : ''}
+                ${uploadStatus === 'rejected' ? 'border-red-400 bg-red-400/10' : 'border-purple-400/50 bg-white/5'}
+              `}>
+                {uploadedImage ? (
+                  <Image
+                    src={uploadedImage}
+                    alt="Uploaded image"
+                    fill
+                    className="object-contain"
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full p-6 text-center">
+                    <div className="mb-4">
+                      <svg className="w-12 h-12 text-purple-400 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-white font-semibold mb-2">Add Your Photo</h3>
+                    <p className="text-purple-200 text-sm mb-4">Share a photo taken at this location</p>
+                    
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isUploading}
+                        className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg text-white text-sm transition-colors disabled:opacity-50"
+                      >
+                        Upload Photo
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Status Animations */}
+              {uploadStatus === 'validating' && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl">
+                  <div className="flex items-center gap-3 text-yellow-400">
+                    <div className="animate-spin rounded-full h-6 w-6 border-2 border-yellow-400 border-t-transparent"></div>
+                    <span>Validating location...</span>
+                  </div>
+                </div>
+              )}
+
+              {uploadStatus === 'success' && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl">
+                  <div className="flex items-center gap-3 text-green-400 animate-pulse">
+                    <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                    </svg>
+                    <span>Photo accepted!</span>
+                  </div>
+                </div>
+              )}
+
+              {uploadStatus === 'rejected' && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl">
+                  <div className="flex flex-col items-center gap-2 text-red-400 animate-bounce">
+                    <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 001.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                    </svg>
+                    <span className="text-sm text-center">Photo too far from location</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Hidden file inputs */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleCameraCapture}
+                className="hidden"
+              />
+            </div>
+
+            {/* Upload Info */}
+            <div className="mt-3 text-xs text-purple-300 text-center">
+              Photos must be taken within 20km of this location
+            </div>
+          </div>
+        </div>
 
         {/* Enhanced Details Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -2120,7 +2323,7 @@ Instructions:
             {/* Spin Wheel + Floating Image Section */}
             <div className="relative">
               {/* Floating Character Image (bottom-right) */}
-              <img
+              <Image
                 src="/qloo_assets/images/prize.png"
                 alt="Prize character"
                 className="hidden lg:block absolute bottom-0 right-0 w-80 object-contain z-10 pointer-events-none"
