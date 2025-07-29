@@ -1,12 +1,12 @@
-# CulturalQuest 🌍
+# Cultour 🌍
 
 A gamified cultural exploration platform that helps new migrants and cultural enthusiasts discover authentic local experiences through AI-powered recommendations, interactive chat, and immersive rewards system.
 
-CulturalQuest blends Qloo’s Taste AI™ with OpenAI’s ChatGPT and ElevenLabs TTS to redefine personalized discovery. CulturalQuest uses advanced multi-stage recommendation‑system techniques — semantic embeddings, contextual bandit learning (a form of online reinforcement learning), and MMR-based diversification — to balance affinity and novelty. The experience is wrapped in a points-and-badges UX to drive discovery through exploration.
+Cultour blends Qloo’s Taste AI™ with OpenAI’s ChatGPT and ElevenLabs TTS to redefine personalized discovery. Cultour uses advanced multi-stage recommendation‑system techniques — semantic embeddings, contextual bandit learning (a form of online reinforcement learning), and MMR-based diversification — to balance affinity and novelty. The experience is wrapped in a points-and-badges UX to drive discovery through exploration.
 
 ---
 
-## 🎯 Why CulturalQuest?
+## 🎯 Why Cultour?
 
 ### Inspiration
 
@@ -14,7 +14,7 @@ As a migrant child in Austin, TX in late 2000s, I relied on a site called **[Sul
 
 Today, Austin is home to **≈296,000 foreign-born residents** (14% of the city's total population, by [Vera Institute](https://vera-institute.files.svdcdn.com/production/downloads/publications/profile-foreign-born-population-austin.pdf)).
 
-**CulturalQuest** evolves that vision with Qloo’s Taste AI™ and LLMs to deliver real-time, privacy-first recommendations that resonate with users’ heritage and evolving tastes.
+**Cultour** evolves that vision with Qloo’s Taste AI™ and LLMs to deliver real-time, privacy-first recommendations that resonate with users’ heritage and evolving tastes.
 
 ### Character Assets
 

@@ -1726,7 +1726,7 @@ Instructions:
                 />
               </div>
               <div>
-                <h1 className="text-white text-xl font-bold">CulturalQuest</h1>
+                <h1 className="text-white text-xl font-bold">Cultour</h1>
                 <p className="text-purple-200 text-sm">Discover. Explore. Achieve.</p>
               </div>
             </div>
