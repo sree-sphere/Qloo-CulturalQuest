@@ -11,6 +11,49 @@ if (!process.env.NEXT_PUBLIC_QLOO_API_KEY) {
   console.warn('❗️Missing NEXT_PUBLIC_QLOO_API_KEY in environment');
 }
 
+const photoBadges: Badge[] = [
+  {
+    id: 'first_snap',
+    name: 'First Snap',
+    description: 'Upload your first location photo',
+    icon: '📸',
+    category: 'explorer',
+    requirement: { type: 'photo_uploads', target: 1 }
+  },
+  {
+    id: 'photo_explorer', 
+    name: 'Photo Explorer',
+    description: 'Upload photos at 5 different locations',
+    icon: '🌟',
+    category: 'explorer',
+    requirement: { type: 'photo_uploads', target: 5 }
+  },
+  {
+    id: 'heritage_photographer',
+    name: 'Heritage Photographer', 
+    description: 'Upload photos at 3 heritage sites',
+    icon: '🏛️',
+    category: 'heritage',
+    requirement: { type: 'heritage_photos', target: 3 }
+  },
+  {
+    id: 'foodie_snapper',
+    name: 'Foodie Snapper',
+    description: 'Upload photos at 7 restaurants',
+    icon: '🍴',
+    category: 'foodie', 
+    requirement: { type: 'restaurant_photos', target: 7 }
+  },
+  {
+    id: 'memory_keeper',
+    name: 'Memory Keeper',
+    description: 'Upload 15 location photos',
+    icon: '📚',
+    category: 'cultural',
+    requirement: { type: 'photo_uploads', target: 15 }
+  }
+];
+
 // Types and Interfaces
 interface UserProfile {
   userId: string;
@@ -58,7 +101,13 @@ interface UserProgress {
     festivalParticipation: number;
     cuisinesTried: string[];
     culturesExplored: string[];
+    photoUploads: {
+      total: number;
+      locations: string[]; // entityIds where photos were uploaded
+      heritagePhotos: number;
+      restaurantPhotos: number;
   };
+};
 }
 
 interface SpinWheelReward {
@@ -127,7 +176,6 @@ export class QlooCulturalGamification {
     { type: 'experience', value: 'free_guide', description: 'Free cultural guide', probability: 0.15 },
     { type: 'badge', value: 'lucky_explorer', description: 'Lucky Explorer badge', probability: 0.05 }
   ];
-
   
   registerUserProfile(userProfile: UserProfile) {
     this.userProfiles.set(userProfile.userId, userProfile);
@@ -140,6 +188,7 @@ export class QlooCulturalGamification {
 
   // User Profile Management
   async createUserProfile(profile: UserProfile): Promise<void> {
+    this.badges = [...this.badges, ...photoBadges];
     this.userProfiles.set(profile.userId, profile);
     this.userProgress.set(profile.userId, {
       userId: profile.userId,
@@ -151,7 +200,13 @@ export class QlooCulturalGamification {
         heritageVisits: 0,
         festivalParticipation: 0,
         cuisinesTried: [],
-        culturesExplored: []
+        culturesExplored: [],
+        photoUploads: {
+          total: 0,
+          locations: [],
+          heritagePhotos: 0,
+          restaurantPhotos: 0
+        }
       }
     });
   }
@@ -351,9 +406,40 @@ export class QlooCulturalGamification {
         return progress.achievements.cuisinesTried.length >= badge.requirement.target;
       case 'festival_participation':
         return progress.achievements.festivalParticipation >= badge.requirement.target;
-      default:
+      case 'photo_uploads':
+        return progress.achievements.photoUploads.total >= badge.requirement.target;
+      case 'heritage_photos':
+        return progress.achievements.photoUploads.heritagePhotos >= badge.requirement.target;
+      case 'restaurant_photos':
+        return progress.achievements.photoUploads.restaurantPhotos >= badge.requirement.target;
+        default:
         return false;
     }
+  }
+
+  async updatePhotoProgress(userId: string, entityId: string, entityType: string): Promise<Badge[]> {
+    const progress = this.userProgress.get(userId);
+    if (!progress) return [];
+
+    // Update photo statistics
+    if (!progress.achievements.photoUploads.locations.includes(entityId)) {
+      progress.achievements.photoUploads.total++;
+      progress.achievements.photoUploads.locations.push(entityId);
+
+      // Categorize photo type
+      if (entityType.toLowerCase().includes('heritage') || entityType.toLowerCase().includes('temple') || entityType.toLowerCase().includes('museum')) {
+        progress.achievements.photoUploads.heritagePhotos++;
+      }
+      if (entityType.toLowerCase().includes('restaurant') || entityType.toLowerCase().includes('food')) {
+        progress.achievements.photoUploads.restaurantPhotos++;
+      }
+
+      // Award points for photo upload
+      progress.points += 100;
+    }
+
+    // Check for new photo badges
+    return await this.checkAndAwardBadges(userId, 'photo_upload', { entityId, entityType });
   }
 
   async spinWheel(userId: string): Promise<SpinWheelReward | null> {

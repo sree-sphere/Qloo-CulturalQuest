@@ -46,7 +46,13 @@ const mockUser = {
     heritageVisits: 18,
     festivalParticipation: 5,
     cuisinesTried: ['Indian', 'Thai', 'Italian', 'Mexican', 'Japanese', 'Lebanese'],
-    culturesExplored: ['South Indian', 'North Indian', 'Thai', 'Mediterranean']
+    culturesExplored: ['South Indian', 'North Indian', 'Thai', 'Mediterranean'],
+    photoUploads: {
+      total: 0,
+      locations: [],
+      heritagePhotos: 0,
+      restaurantPhotos: 0
+    }
   },
   currentStreak: { type: 'cultural_exploration', count: 12 }
 };
@@ -228,7 +234,20 @@ useEffect(() => {
   }
 });
 
-  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+  const [uploadedImage, setUploadedImage] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const cachedImages = {};
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith('uploaded-image-')) {
+        const entityId = key.replace('uploaded-image-', '');
+        const imageUrl = localStorage.getItem(key);
+        if (imageUrl) {
+          cachedImages[entityId] = imageUrl;
+        }
+      }
+    });
+    setUploadedImage(cachedImages);
+  }, []);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'validating' | 'success' | 'rejected'>('idle');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -251,7 +270,7 @@ useEffect(() => {
   const diversificationEnabled = true;
   const [results, setResults] = useState<any[]>([]);
   const [heartAnimation, setHeartAnimation] = useState<string | null>(null);
-  const [entityDetails, setEntityDetails] = useState<any>(null);
+  const [entityDetails, setEntityDetails] = useState<any | null>(null);
   const [showEntityModal, setShowEntityModal] = useState(false);
   const CACHE_KEY = 'recs-nostalgic';
 
@@ -389,34 +408,64 @@ useEffect(() => {
   };
 
   const handleLearnMore = async (entityId: string) => {
-    try {
-      const fullApiData = JSON.parse(localStorage.getItem('full-api-responses') || '[]');
-      console.log('Entity ID:', entityId, 'Full API Data:', fullApiData); // Debug
-      const entity = fullApiData.find(e => e.entity_id === entityId);
-      if (!entity) {
-        setError('Entity details not found. Try refreshing recommendations.');
-        return;
-      }
-      const enhancedDetails = {
-        ...entity,
-        formattedHours: entity.properties?.hours ? Object.entries(entity.properties.hours).map(([day, times]) => ({
-          day,
-          times: times.map(t => `${formatTime(t.opens)} - ${formatTime(t.closes)}`).join(', ')
-        })) : [],
-        amenities: entity.tags?.filter(t => t.type.includes('amenity')).map(t => t.name) || [],
-        offerings: entity.tags?.filter(t => t.type.includes('offerings')).map(t => t.name) || [],
-        specialtyDishes: entity.properties?.specialty_dishes?.map(d => d.name) || [],
-        priceRange: entity.properties?.price_range ? 
-          `$${entity.properties.price_range.from}-${entity.properties.price_range.to}` : null
-      };
-      setEntityDetails(enhancedDetails);
-      setShowEntityModal(true);
-      console.log('Modal opened:', enhancedDetails, showEntityModal); // Debug
-    } catch (error) {
-      console.error('Error loading entity details:', error);
-      setError('Failed to load details. Please try again.');
+  try {
+    console.log(`handleLearnMore: Called with entityId="${entityId}"`);
+    const fullApiDataRaw = localStorage.getItem('full-api-responses');
+    if (!fullApiDataRaw) {
+      console.error('handleLearnMore: full-api-responses not found in localStorage');
+      setError('No recommendation data available. Please try refreshing recommendations.');
+      return;
     }
-  };
+
+    let fullApiData;
+    try {
+      fullApiData = JSON.parse(fullApiDataRaw);
+      console.log('handleLearnMore: Parsed fullApiData=', fullApiData);
+    } catch (parseError) {
+      console.error('handleLearnMore: Failed to parse full-api-responses:', parseError);
+      setError('Invalid recommendation data. Please try refreshing recommendations.');
+      return;
+    }
+
+    if (!Array.isArray(fullApiData) || fullApiData.length === 0) {
+      console.error('handleLearnMore: fullApiData is empty or not an array');
+      setError('No recommendation data available. Try refreshing recommendations.');
+      return;
+    }
+
+    const entity = fullApiData.find(e => e.entity_id === entityId);
+    if (!entity) {
+      console.error(`handleLearnMore: No entity found for entityId="${entityId}"`);
+      setError('Entity details not found. Try refreshing recommendations.');
+      return;
+    }
+
+    const enhancedDetails = {
+      ...entity,
+      entityId: entity.entity_id, // Ensure consistent property name
+      formattedHours: entity.properties?.hours
+        ? Object.entries(entity.properties.hours).map(([day, times]) => ({
+            day,
+            times: times.map(t => `${formatTime(t.opens)} - ${formatTime(t.closes)}`).join(', ')
+          }))
+        : [],
+      amenities: entity.tags?.filter(t => t.type.includes('amenity')).map(t => t.name) || [],
+      offerings: entity.tags?.filter(t => t.type.includes('offerings')).map(t => t.name) || [],
+      specialtyDishes: entity.properties?.specialty_dishes?.map(d => d.name) || [],
+      priceRange: entity.properties?.price_range
+        ? `$${entity.properties.price_range.from}-${entity.properties.price_range.to}`
+        : null
+    };
+    console.log('handleLearnMore: Setting entityDetails=', enhancedDetails);
+    setEntityDetails(enhancedDetails);
+    setShowEntityModal(true);
+    console.log('handleLearnMore: Set showEntityModal=true');
+  } catch (error) {
+    console.error('handleLearnMore: Error loading entity details:', error);
+    setError('Failed to load details. Please try again.');
+    setShowEntityModal(false);
+  }
+};
 
   // Distance calculation function (Haversine formula)
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
@@ -459,20 +508,70 @@ useEffect(() => {
         if (distance <= 20) {
           // Image is within 20km - accept it
           const imageUrl = URL.createObjectURL(file);
-          setUploadedImage(imageUrl);
+          setUploadedImage(prev => ({
+            ...prev,
+            [entityDetails.entityId]: imageUrl
+          }));
           setUploadStatus('success');
           
-          // Store in cache with entity ID
-          const cacheKey = `uploaded-image-${entityDetails.entityId}`;
-          localStorage.setItem(cacheKey, imageUrl);
-          
+          try {
+            // Store in cache with entity ID
+            const cacheKey = `uploaded-image-${entityDetails.entityId}`;
+            localStorage.setItem(cacheKey, imageUrl);
+
+            const newBadges = await gamification.updatePhotoProgress(
+              userProfile.userId, 
+              entityDetails.entityId, 
+              entityDetails.type || 'unknown'
+            );
+
+            const newPoints = userPoints + 200;
+            setUserPoints(newPoints);
+            localStorage.setItem('user-points', JSON.stringify(newPoints));
+              
+            // Update photo upload progress
+            const updatedProfile = {
+              ...userProfile,
+              achievements: {
+                ...userProfile.achievements,
+                photoUploads: {
+                  ...userProfile.achievements.photoUploads,
+                  total: (userProfile.achievements.photoUploads.total || 0) + 1,
+                  locations: [
+                    ...(userProfile.achievements.photoUploads.locations || []),
+                    entityDetails.entityId
+                  ]
+                }
+              }
+            };
+            setUserProfile(updatedProfile);
+            localStorage.setItem('qloo-user-profile', JSON.stringify(updatedProfile));
+
+            // Badge notification if new badges earned
+            if (newBadges.length > 0) {
+              // floating badge notification
+              newBadges.forEach((badge, index) => {
+                setTimeout(() => {
+                  showBadgeNotification(badge);
+                }, index * 1000);
+              });
+            }
+             showPointsNotification(200);
+          } catch (badgeError) {
+            console.error('Error updating photo progress:', badgeError);
+          }
           setTimeout(() => setUploadStatus('idle'), 2000);
         } else {
           // Image is too far - reject it
           setUploadStatus('rejected');
           setTimeout(() => {
             setUploadStatus('idle');
-            setUploadedImage(null);
+            setUploadedImage(prev => {
+  const updated = { ...prev };
+  delete updated[entityDetails.entityId];
+  return updated;
+});
+
           }, 3000);
         }
       } else {
@@ -487,6 +586,56 @@ useEffect(() => {
     } finally {
       setIsUploading(false);
     }
+  };
+
+  // Badge notification function
+  const showBadgeNotification = (badge) => {
+    const notification = document.createElement('div');
+    notification.className = `
+      fixed top-20 right-4 z-50 bg-gradient-to-r from-yellow-400 to-orange-500 
+      text-black px-6 py-4 rounded-2xl shadow-2xl transform animate-bounce
+      border-2 border-yellow-300
+    `;
+    notification.innerHTML = `
+      <div class="flex items-center space-x-3">
+        <span class="text-3xl animate-pulse">${badge.icon}</span>
+        <div>
+          <div class="font-bold text-lg">🎉 New Badge Unlocked!</div>
+          <div class="text-sm font-medium">${badge.name}</div>
+          <div class="text-xs opacity-75">${badge.description}</div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(notification);
+    
+    // Add exit animation
+    setTimeout(() => {
+      notification.style.transform = 'translateX(100%)';
+      notification.style.opacity = '0';
+      setTimeout(() => notification.remove(), 300);
+    }, 4000);
+  };
+
+  // Points notification function
+  const showPointsNotification = (points) => {
+    const notification = document.createElement('div');
+    notification.className = `
+      fixed top-4 right-4 z-50 bg-gradient-to-r from-green-400 to-blue-500 
+      text-white px-4 py-2 rounded-xl shadow-lg transform animate-bounce
+    `;
+    notification.innerHTML = `
+      <div class="flex items-center space-x-2">
+        <span class="text-lg">⚡</span>
+        <span class="font-semibold">+${points} points!</span>
+      </div>
+    `;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+      notification.style.transform = 'translateY(-100%)';
+      notification.style.opacity = '0';
+      setTimeout(() => notification.remove(), 300);
+    }, 2000);
   };
 
   // File input handlers
@@ -506,13 +655,20 @@ useEffect(() => {
 
   // Check for cached image on component mount
   useEffect(() => {
-    if (!entityDetails?.entityId) return;
-    const cacheKey = `uploaded-image-${entityDetails.entityId}`;
-    const cachedImage = localStorage.getItem(cacheKey);
-    if (cachedImage) {
-      setUploadedImage(cachedImage);
-    }
-  }, [entityDetails?.entityId]);
+  if (!entityDetails?.entityId) return;
+  const cacheKey = `uploaded-image-${entityDetails.entityId}`;
+  const cachedImage = localStorage.getItem(cacheKey);
+  if (cachedImage) {
+  setUploadedImage(prev => ({ ...prev, [entityDetails.entityId]: cachedImage }));
+} else {
+  setUploadedImage(prev => {
+    const updated = { ...prev };
+    delete updated[entityDetails.entityId];
+    return updated;
+  });
+}
+
+}, [entityDetails?.entityId]);
   
   const quickPrompts = [
       {
@@ -669,7 +825,7 @@ useEffect(() => {
         body: JSON.stringify({
           entities: entities,
           userPreferences: userPrefs,
-          interactions: interactions, // ADD THIS LINE
+          interactions: interactions,
           options: {
             nTotal: 8,
             nHighAffinity: 3,
@@ -1385,6 +1541,10 @@ Instructions:
             onSubmit={e => {
               e.preventDefault();
               localStorage.setItem('qloo-user-profile', JSON.stringify(profileForm));
+              // Check if location changed and reset nostalgic cache
+              if (profileForm.location.current !== userProfile.location.current) {
+                localStorage.removeItem('recs-nostalgic');
+              }
               const updated = {
                 ...userProfile,
                 ...profileForm,
@@ -1974,275 +2134,273 @@ Instructions:
               <div className="flex justify-center min-h-screen p-6 pt-120">
                 <div className="bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 max-w-4xl w-full">
                   <div className="p-6">
-                    {/* Header */}
-                    <div className="flex justify-between items-start mb-6">
-                      <div>
-                        <h2 className="text-2xl font-bold text-white mb-2">{entityDetails.name}</h2>
-                      </div>
-                      <button
-                        onClick={() => setShowEntityModal(false)}
-                        className="text-white hover:text-red-400 transition-colors"
-                      >
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
+  {/* Header */}
+  <div className="flex justify-between items-start mb-6">
+    <div>
+      <h2 className="text-2xl font-bold text-white mb-2">{entityDetails?.name || 'Unknown Place'}</h2>
+    </div>
+    <button
+      onClick={() => setShowEntityModal(false)}
+      className="text-white hover:text-red-400 transition-colors"
+    >
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+      </svg>
+    </button>
+  </div>
 
-        {/* Image with Error Handling */}
-        <div className="flex flex-col lg:flex-row gap-6 mb-6">
-          {/* Original Image */}
-          <div className="flex-1">
-            {entityDetails.image && !imageErrors.has(entityDetails.entityId) ? (
-              <div className="relative w-full aspect-video rounded-2xl overflow-hidden bg-black">
-                <Image
-                  src={entityDetails.image}
-                  alt={entityDetails.name}
-                  fill
-                  className="object-contain"
-                  unoptimized
-                  onError={() => handleImageError(entityDetails.entityId)}
-                />
-              </div>
-            ) : (
-              <div>
-                <Image
-                  src="/qloo_assets/images/image_expanded.jpg"
-                  alt={entityDetails.name}
-                  width={600}
-                  height={300}
-                  className="w-full h-64 object-cover rounded-2xl"
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Image Upload */}
-          <div className="flex-1">
-            <div className="relative">
-              {/* Upload Area */}
-              <div className={`
-                relative w-full aspect-video rounded-2xl overflow-hidden border-2 border-dashed transition-all duration-300
-                ${uploadStatus === 'validating' ? 'border-yellow-400 bg-yellow-400/10' : ''}
-                ${uploadStatus === 'success' ? 'border-green-400 bg-green-400/10' : ''}
-                ${uploadStatus === 'rejected' ? 'border-red-400 bg-red-400/10' : 'border-purple-400/50 bg-white/5'}
-              `}>
-                {uploadedImage ? (
-                  <Image
-                    src={uploadedImage}
-                    alt="Uploaded image"
-                    fill
-                    className="object-contain"
-                  />
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-full p-6 text-center">
-                    <div className="mb-4">
-                      <svg className="w-12 h-12 text-purple-400 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                      </svg>
-                    </div>
-                    <h3 className="text-white font-semibold mb-2">Add Your Photo</h3>
-                    <p className="text-purple-200 text-sm mb-4">Share a photo taken at this location</p>
-                    
-                    <div className="flex gap-3">
-                      <button
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={isUploading}
-                        className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg text-white text-sm transition-colors disabled:opacity-50"
-                      >
-                        Upload Photo
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Status Animations */}
-              {uploadStatus === 'validating' && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl">
-                  <div className="flex items-center gap-3 text-yellow-400">
-                    <div className="animate-spin rounded-full h-6 w-6 border-2 border-yellow-400 border-t-transparent"></div>
-                    <span>Validating location...</span>
-                  </div>
-                </div>
-              )}
-
-              {uploadStatus === 'success' && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl">
-                  <div className="flex items-center gap-3 text-green-400 animate-pulse">
-                    <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                    </svg>
-                    <span>Photo accepted!</span>
-                  </div>
-                </div>
-              )}
-
-              {uploadStatus === 'rejected' && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl">
-                  <div className="flex flex-col items-center gap-2 text-red-400 animate-bounce">
-                    <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 001.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                    </svg>
-                    <span className="text-sm text-center">Photo too far from location</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Hidden file inputs */}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleFileSelect}
-                className="hidden"
-              />
-              <input
-                ref={cameraInputRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={handleCameraCapture}
-                className="hidden"
-              />
-            </div>
-
-            {/* Upload Info */}
-            <div className="mt-3 text-xs text-purple-300 text-center">
-              Photos must be taken within 20km of this location
-            </div>
-          </div>
+  {/* Image with Error Handling */}
+  <div className="flex flex-col lg:flex-row gap-6 mb-6">
+    {/* Original Image */}
+    <div className="flex-1">
+      {entityDetails?.image && !imageErrors.has(entityDetails?.entityId || '') ? (
+        <div className="relative w-full aspect-video rounded-2xl overflow-hidden bg-black">
+          <Image
+            src={entityDetails.image}
+            alt={entityDetails.name || 'Place image'}
+            fill
+            className="object-contain"
+            unoptimized
+            onError={() => handleImageError(entityDetails?.entityId || '')}
+          />
         </div>
+      ) : (
+        <div>
+          <Image
+            src="/qloo_assets/images/image_expanded.jpg"
+            alt={entityDetails?.name || 'Place image'}
+            width={600}
+            height={300}
+            className="w-full h-64 object-cover rounded-2xl"
+          />
+        </div>
+      )}
+    </div>
 
-        {/* Enhanced Details Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          {/* Hours */}
-          {entityDetails.formattedHours?.length > 0 && (
-            <div className="bg-white/10 rounded-2xl p-4">
-              <h3 className="text-white font-semibold mb-2">Hours</h3>
-              <div className="space-y-1">
-                {entityDetails.formattedHours.map(hour => (
-                  <div key={hour.day} className="flex justify-between text-sm">
-                    <span className="text-purple-200">{hour.day}:</span>
-                    <span className="text-white">{hour.times}</span>
-                  </div>
-                ))}
+    {/* Image Upload */}
+    <div className="flex-1">
+      <div className="relative">
+        {/* Upload Area */}
+        <div className={`
+          relative w-full aspect-video rounded-2xl overflow-hidden border-2 border-dashed transition-all duration-300
+          ${uploadStatus === 'validating' ? 'border-yellow-400 bg-yellow-400/10' : ''}
+          ${uploadStatus === 'success' ? 'border-green-400 bg-green-400/10' : ''}
+          ${uploadStatus === 'rejected' ? 'border-red-400 bg-red-400/10' : 'border-purple-400/50 bg-white/5'}
+        `}>
+          {entityDetails?.entityId && uploadedImage[entityDetails.entityId] ? (
+            <Image
+              src={uploadedImage[entityDetails.entityId]}
+              alt="Uploaded image"
+              fill
+              className="object-contain"
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full p-6 text-center">
+              <div className="mb-4">
+                <svg className="w-12 h-12 text-purple-400 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
               </div>
-            </div>
-          )}
-
-          {/* Price Range */}
-          {entityDetails.priceRange && (
-            <div className="bg-white/10 rounded-2xl p-4">
-              <h3 className="text-white font-semibold mb-2">Price Range</h3>
-              <p className="text-green-400 text-lg">{entityDetails.priceRange}</p>
-            </div>
-          )}
-
-          {/* Contact Info */}
-          <div className="bg-white/10 rounded-2xl p-4">
-            <h3 className="text-white font-semibold mb-2">Contact</h3>
-            {entityDetails.properties?.phone && (
-              <p className="text-purple-200 text-sm mb-1">{entityDetails.properties.phone}</p>
-            )}
-          </div>
-
-          {/* Menu Link */}
-          {entityDetails.properties?.menu_url && (
-            <div className="bg-white/10 rounded-2xl p-4">
-              <h3 className="text-white font-semibold mb-2">Menu</h3>
-              <a href={entityDetails.properties.menu_url} target="_blank" rel="noopener noreferrer"
-                 className="text-green-400 hover:text-green-300 text-sm">
-                View Menu
-              </a>
+              <h3 className="text-white font-semibold mb-2">Add Your Photo</h3>
+              <p className="text-purple-200 text-sm mb-4">Share a photo taken at this location</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading || !entityDetails?.entityId}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg text-white text-sm transition-colors disabled:opacity-50"
+                >
+                  Upload Photo
+                </button>
+              </div>
             </div>
           )}
         </div>
 
-        {/* Specialty Dishes */}
-        {entityDetails.specialtyDishes?.length > 0 && (
-          <div className="bg-white/10 rounded-2xl p-4 mb-6">
-            <h3 className="text-white font-semibold mb-2">Specialty Dishes</h3>
-            <div className="flex flex-wrap gap-2">
-              {entityDetails.specialtyDishes.map((dish, idx) => (
-                <span key={idx} className="bg-gradient-to-r from-orange-500 to-red-500 text-white px-3 py-1 rounded-full text-xs">
-                  {dish}
-                </span>
-              ))}
+        {/* Status Animations */}
+        {uploadStatus === 'validating' && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl">
+            <div className="flex items-center gap-3 text-yellow-400">
+              <div className="animate-spin rounded-full h-6 w-6 border-2 border-yellow-400 border-t-transparent"></div>
+              <span>Validating location...</span>
             </div>
           </div>
         )}
 
-        {/* Amenities & Offerings */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          {entityDetails.amenities?.length > 0 && (
-            <div className="bg-white/10 rounded-2xl p-4">
-              <h3 className="text-white font-semibold mb-2">Amenities</h3>
-              <div className="flex flex-wrap gap-1">
-                {entityDetails.amenities.map((amenity, idx) => (
-                  <span key={idx} className="bg-blue-500/20 text-blue-200 px-2 py-1 rounded text-xs">
-                    {amenity}
-                  </span>
-                ))}
-              </div>
+        {uploadStatus === 'success' && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl">
+            <div className="flex items-center gap-3 text-green-400 animate-pulse">
+              <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+              <span>Photo accepted!</span>
             </div>
-          )}
-
-          {entityDetails.offerings?.length > 0 && (
-            <div className="bg-white/10 rounded-2xl p-4">
-              <h3 className="text-white font-semibold mb-2">Offerings</h3>
-              <div className="flex flex-wrap gap-1">
-                {entityDetails.offerings.map((offering, idx) => (
-                  <span key={idx} className="bg-green-500/20 text-green-200 px-2 py-1 rounded text-xs">
-                    {offering}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Description */}
-        {entityDetails.description && (
-          <div className="bg-white/10 rounded-2xl p-4 mb-6">
-            <h3 className="text-white font-semibold mb-2">Description</h3>
-            <p className="text-purple-200 leading-relaxed">{entityDetails.description}</p>
           </div>
         )}
 
-        {/* Action Buttons */}
-        <div className="flex space-x-4">
-          <button
-            onClick={() => handleHeartClick(entityDetails.entityId)}
-            className={`flex-1 py-3 rounded-2xl font-semibold transition-all ${
-              likedPlaces.has(entityDetails.entityId)
-                ? 'bg-red-500 text-white'
-                : 'bg-white/10 text-white hover:bg-white/20'
-            }`}
-          >
-            {likedPlaces.has(entityDetails.entityId) ? '❤️ Liked' : '🤍 Add to Favorites'}
-          </button>
-          
-          <button
-            onClick={() => {
-              if (entityDetails.properties?.website) {
-                window.open(entityDetails.properties.website, '_blank');
-              }
-              console.log('Viewed entity details:', entityDetails.entityId);
-              setShowEntityModal(false);
-            }}
-            disabled={!entityDetails.properties?.website}
-            className={`flex-1 py-3 rounded-2xl font-semibold transition-all ${
-              entityDetails.properties?.website
-                ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:scale-105'
-                : 'bg-gray-500 text-gray-300 cursor-not-allowed'
-            }`}
-          >
-            Visit Now
-          </button>
+        {uploadStatus === 'rejected' && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl">
+            <div className="flex flex-col items-center gap-2 text-red-400 animate-bounce">
+              <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 001.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              </svg>
+              <span className="text-sm text-center">Photo too far from location</span>
+            </div>
+          </div>
+        )}
 
-                  </div>
-                </div>
+        {/* Hidden file inputs */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleFileSelect}
+          className="hidden"
+        />
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handleCameraCapture}
+          className="hidden"
+        />
+      </div>
+
+      {/* Upload Info */}
+      <div className="mt-3 text-xs text-purple-300 text-center">
+        Photos must be taken within 20km of this location
+      </div>
+    </div>
+  </div>
+
+  {/* Enhanced Details Grid */}
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+    {/* Hours */}
+    {entityDetails?.formattedHours?.length > 0 && (
+      <div className="bg-white/10 rounded-2xl p-4">
+        <h3 className="text-white font-semibold mb-2">Hours</h3>
+        <div className="space-y-1">
+          {entityDetails.formattedHours.map((hour: { day: string; times: string }, idx: number) => (
+            <div key={idx} className="flex justify-between text-sm">
+              <span className="text-purple-200">{hour.day}:</span>
+              <span className="text-white">{hour.times}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+
+    {/* Price Range */}
+    {entityDetails?.priceRange && (
+      <div className="bg-white/10 rounded-2xl p-4">
+        <h3 className="text-white font-semibold mb-2">Price Range</h3>
+        <p className="text-green-400 text-lg">{entityDetails.priceRange}</p>
+      </div>
+    )}
+
+    {/* Contact Info */}
+    {entityDetails?.properties?.phone && (
+      <div className="bg-white/10 rounded-2xl p-4">
+        <h3 className="text-white font-semibold mb-2">Contact</h3>
+        <p className="text-purple-200 text-sm mb-1">{entityDetails.properties.phone}</p>
+      </div>
+    )}
+
+    {/* Menu Link */}
+    {entityDetails?.properties?.menu_url && (
+      <div className="bg-white/10 rounded-2xl p-4">
+        <h3 className="text-white font-semibold mb-2">Menu</h3>
+        <a href={entityDetails.properties.menu_url} target="_blank" rel="noopener noreferrer"
+           className="text-green-400 hover:text-green-300 text-sm">
+          View Menu
+        </a>
+      </div>
+    )}
+  </div>
+
+  {/* Specialty Dishes */}
+  {entityDetails?.specialtyDishes?.length > 0 && (
+    <div className="bg-white/10 rounded-2xl p-4 mb-6">
+      <h3 className="text-white font-semibold mb-2">Specialty Dishes</h3>
+      <div className="flex flex-wrap gap-2">
+        {entityDetails.specialtyDishes.map((dish: string, idx: number) => (
+          <span key={idx} className="bg-gradient-to-r from-orange-500 to-red-500 text-white px-3 py-1 rounded-full text-xs">
+            {dish}
+          </span>
+        ))}
+      </div>
+    </div>
+  )}
+
+  {/* Amenities & Offerings */}
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+    {entityDetails?.amenities?.length > 0 && (
+      <div className="bg-white/10 rounded-2xl p-4">
+        <h3 className="text-white font-semibold mb-2">Amenities</h3>
+        <div className="flex flex-wrap gap-1">
+          {entityDetails.amenities.map((amenity: string, idx: number) => (
+            <span key={idx} className="bg-blue-500/20 text-blue-200 px-2 py-1 rounded text-xs">
+              {amenity}
+            </span>
+          ))}
+        </div>
+      </div>
+    )}
+
+    {entityDetails?.offerings?.length > 0 && (
+      <div className="bg-white/10 rounded-2xl p-4">
+        <h3 className="text-white font-semibold mb-2">Offerings</h3>
+        <div className="flex flex-wrap gap-1">
+          {entityDetails.offerings.map((offering: string, idx: number) => (
+            <span key={idx} className="bg-green-500/20 text-green-200 px-2 py-1 rounded text-xs">
+              {offering}
+            </span>
+          ))}
+        </div>
+      </div>
+    )}
+  </div>
+
+  {/* Description */}
+  {entityDetails?.description && (
+    <div className="bg-white/10 rounded-2xl p-4 mb-6">
+      <h3 className="text-white font-semibold mb-2">Description</h3>
+      <p className="text-purple-200 leading-relaxed">{entityDetails.description}</p>
+    </div>
+  )}
+
+  {/* Action Buttons */}
+  <div className="flex space-x-4">
+    <button
+      onClick={() => entityDetails?.entityId && handleHeartClick(entityDetails.entityId)}
+      className={`flex-1 py-3 rounded-2xl font-semibold transition-all ${
+        entityDetails?.entityId && likedPlaces.has(entityDetails.entityId)
+          ? 'bg-red-500 text-white'
+          : 'bg-white/10 text-white hover:bg-white/20'
+      }`}
+    >
+      {entityDetails?.entityId && likedPlaces.has(entityDetails.entityId) ? '❤️ Liked' : '🤍 Add to Favorites'}
+    </button>
+    
+    <button
+      onClick={() => {
+        if (entityDetails?.properties?.website) {
+          window.open(entityDetails.properties.website, '_blank');
+        }
+        console.log('Viewed entity details:', entityDetails?.entityId || 'unknown');
+        setShowEntityModal(false);
+      }}
+      disabled={!entityDetails?.properties?.website}
+      className={`flex-1 py-3 rounded-2xl font-semibold transition-all ${
+        entityDetails?.properties?.website
+          ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:scale-105'
+          : 'bg-gray-500 text-gray-300 cursor-not-allowed'
+      }`}
+    >
+      Visit Now
+    </button>
+  </div>
+</div>
               </div>
             </div>
             </div>
@@ -2257,18 +2415,18 @@ Instructions:
         )}
 
         {/* Progress Tab */}
-        {(activeTab === 'progress') && (
+        {activeTab === 'progress' && (
           <div className="space-y-6">
-            {/* Badges Section */}
+            {/* Badges Section - Use current userProfile.badges */}
             <div className="bg-white/10 backdrop-blur-sm rounded-3xl p-6 border border-white/20">
               <h3 className="text-2xl font-bold text-white mb-6 flex items-center">
                 <Trophy className="w-6 h-6 mr-2 text-yellow-400" />
-                Your Badges ({mockUser.badges.length})
+                Your Badges ({userProfile.badges.length})
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {mockUser.badges.map((badge, idx) => (
-                  <div key={idx} className="bg-gradient-to-br from-yellow-400/20 to-orange-500/20 rounded-2xl p-6 border border-yellow-400/30 text-center">
-                    <div className="text-4xl mb-3">{badge.icon}</div>
+                {userProfile.badges.map((badge, idx) => (
+                  <div key={idx} className="bg-gradient-to-br from-yellow-400/20 to-orange-500/20 rounded-2xl p-6 border border-yellow-400/30 text-center transform hover:scale-105 transition-all duration-200">
+                    <div className="text-4xl mb-3 animate-pulse">{badge.icon}</div>
                     <h4 className="font-bold text-white mb-2">{badge.name}</h4>
                     <span className="bg-white/20 text-white text-xs px-3 py-1 rounded-full">
                       {badge.category}
@@ -2276,13 +2434,11 @@ Instructions:
                   </div>
                 ))}
                 
+                {/* Next badge preview */}
                 <div className="bg-white/5 border-2 border-dashed border-white/20 rounded-2xl p-6 text-center">
                   <div className="text-4xl mb-3 opacity-50">🔒</div>
-                  <h4 className="font-bold text-purple-200 mb-2">Cultural Bridge Builder</h4>
-                  <p className="text-sm text-purple-300">Visit 2 more heritage sites</p>
-                  <div className="mt-3 bg-white/10 rounded-full h-2">
-                    <div className="bg-gradient-to-r from-purple-400 to-pink-400 h-full rounded-full" style={{width: '80%'}}></div>
-                  </div>
+                  <h4 className="font-bold text-purple-200 mb-2">Next Badge</h4>
+                  <p className="text-sm text-purple-300">Keep exploring to unlock!</p>
                 </div>
               </div>
             </div>
@@ -2290,10 +2446,10 @@ Instructions:
             {/* Achievement Stats */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {[
-                { label: 'Heritage Sites', value: mockUser.achievements.heritageVisits, icon: '🏛️', color: 'from-blue-500 to-purple-500' },
-                { label: 'Festivals Joined', value: mockUser.achievements.festivalParticipation, icon: '🎉', color: 'from-orange-500 to-red-500' },
-                { label: 'Cuisines Tried', value: mockUser.achievements.cuisinesTried.length, icon: '🍛', color: 'from-green-500 to-teal-500' },
-                { label: 'Cultures Explored', value: mockUser.achievements.culturesExplored.length, icon: '🌍', color: 'from-pink-500 to-purple-500' }
+                { label: 'Heritage Sites', value: userProfile.achievements?.heritageVisits || 0, icon: '🏛️', color: 'from-blue-500 to-purple-500' },
+                { label: 'Photos Uploaded', value: userProfile.achievements?.photoUploads?.total || 0, icon: '📸', color: 'from-orange-500 to-red-500' },
+                { label: 'Cuisines Tried', value: userProfile.achievements?.cuisinesTried?.length || 0, icon: '🍛', color: 'from-green-500 to-teal-500' },
+                { label: 'Cultures Explored', value: userProfile.achievements?.culturesExplored?.length || 0, icon: '🌍', color: 'from-pink-500 to-purple-500' }
               ].map((stat, idx) => (
                 <div key={idx} className={`bg-gradient-to-br ${stat.color} rounded-2xl p-6 text-white`}>
                   <div className="text-3xl mb-2">{stat.icon}</div>

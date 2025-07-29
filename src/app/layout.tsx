@@ -23,8 +23,11 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
-      <body className="geist_e531dabc-module__QGiZLq__variable geist_mono_68a01160-module__YLcDdW__varia...">
+    <html lang="en" style={{ overscrollBehaviorX: 'none' }}>
+      <body
+        style={{ overscrollBehaviorX: 'none' }}
+        className={`${geistSans.variable} ${geistMono.variable}`}
+      >
         {children}
       </body>
     </html>
