@@ -208,31 +208,32 @@ const CulturalGamificationApp = () => {
   const [userInput, setUserInput] = useState('');
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [userProfile, setUserProfile] = useState(() => {
-  if (typeof window !== 'undefined') {
-    const saved = localStorage.getItem('qloo-user-profile');
-    return saved
-      ? { ...mockUser, ...JSON.parse(saved) }
-      : mockUser;
-  }
-  return mockUser;
-});
-useEffect(() => {
-    if (userProfile) {
-      app.initializeUser(userProfile);
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('qloo-user-profile');
+      return saved
+        ? { ...mockUser, ...JSON.parse(saved) }
+        : mockUser;
     }
-  }, [userProfile]);
+    return mockUser;
+  });
+  useEffect(() => {
+      if (userProfile) {
+        app.initializeUser(userProfile);
+      }
+    }, [userProfile]);
 
   const [profileForm, setProfileForm] = useState({
-  name: mockUser.name,
-  demographics: { age: mockUser.demographics.age, gender: mockUser.demographics.gender, ethnicity: mockUser.demographics.ethnicity, religion: mockUser.demographics.religion, maritalStatus: mockUser.demographics.maritalStatus },
-  location: { current: mockUser.location.current },
-  preferences: {
-    cuisines: mockUser.preferences.cuisines,
-    culturalInterests: mockUser.preferences.culturalInterests,
-    travelStyle: mockUser.preferences.travelStyle,
-    nostalgicPeriods: mockUser.preferences.nostalgicPeriods
-  }
-});
+    name: mockUser.name,
+    demographics: { age: mockUser.demographics.age, gender: mockUser.demographics.gender, ethnicity: mockUser.demographics.ethnicity, religion: mockUser.demographics.religion, maritalStatus: mockUser.demographics.maritalStatus },
+    location: { current: mockUser.location.current },
+    preferences: {
+      cuisines: mockUser.preferences.cuisines,
+      culturalInterests: mockUser.preferences.culturalInterests,
+      travelStyle: mockUser.preferences.travelStyle,
+      nostalgicPeriods: mockUser.preferences.nostalgicPeriods,
+      isVegetarian: mockUser.preferences.isVegetarian
+    }
+  });
 
   const [uploadedImage, setUploadedImage] = useState<Record<string, string>>({});
   useEffect(() => {
@@ -955,6 +956,7 @@ useEffect(() => {
       const uniqueEntities = Array.from(
         new Map(entities.map(e => [e.entity_id, e])).values()
       );
+      localStorage.setItem('full-api-responses', JSON.stringify(uniqueEntities));
       console.log('Extracted entities:', uniqueEntities);
       const userPrefs = [
           ...(userProfile.preferences?.cuisines || []),
@@ -1559,7 +1561,7 @@ Instructions:
               setUserProfile(prev => ({ ...prev, ...profileForm }));
               setShowProfileModal(false);
             }}
-            className="bg-white/10 backdrop-blur-md rounded-2xl p-8 w-full max-w-lg space-y-6 transform scale-95 opacity-0 animate-modal-in"
+            className="bg-white/10 backdrop-blur-md rounded-2xl p-8 w-full max-w-lg space-y-6 transform scale-95 opacity-0 animate-modal-in mt-20 max-h-[calc(100vh-100px)] overflow-y-auto"
           >
             <h2 className="text-2xl font-bold">Edit Your Profile</h2>
 
@@ -1690,6 +1692,22 @@ Instructions:
                 <option value="authentic">Authentic</option>
                 <option value="modern">Modern</option>
               </select>
+            </div>
+
+            {/* Vegetarian Toggle */}
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium mb-1">Are you Vegetarian?</label>
+              <input
+                type="checkbox"
+                checked={profileForm.preferences.isVegetarian}
+                onChange={e =>
+                  setProfileForm(f => ({
+                    ...f,
+                    preferences: { ...f.preferences, isVegetarian: e.target.checked }
+                  }))
+                }
+                className="w-5 h-5 text-teal-600 focus:ring-2 focus:ring-indigo-300 rounded"
+              />
             </div>
 
             {/* Buttons */}

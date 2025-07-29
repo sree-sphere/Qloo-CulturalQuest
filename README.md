@@ -1,4 +1,4 @@
-# Cultour 🌍
+# Cultour - A Cultural Quest App 🌍
 
 A gamified cultural exploration platform that helps new migrants and cultural enthusiasts discover authentic local experiences through AI-powered recommendations, interactive chat, and immersive rewards system.
 
